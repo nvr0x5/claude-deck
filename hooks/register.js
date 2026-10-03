@@ -218,6 +218,10 @@ function withFadeIn(source, ageMs) {
 // the pet and what it reacts to
 const pet = createPet(Date.now())
 let turnActive = false
+// /deck demo fills in a sample route and limits when the real ones haven't arrived yet;
+// the first real reading replaces them
+let demoRoute = false
+let demoUsage = false
 let lastActivity = Date.now()
 let celebrateUntil = 0
 
@@ -485,9 +489,17 @@ function syncTasksBar() {
 // ---------- routing: read what a router says ----------
 
 // "jev · fast 0.87 → haiku/low", "jev · fast 0.41 · unchanged", "jev · no answer"
+function dropDemoRoute() {
+  if (!demoRoute) return
+  demoRoute = false
+  route = null
+  routeHist.length = 0
+}
+
 function readRouteStatus(text) {
   const m = String(text).match(/^jev · (\w+) ([\d.]+|n\/d)(?: → (\S+)| · unchanged)?/)
   if (!m) return false
+  dropDemoRoute()
   const r = { tier: m[1], conf: m[2] === 'n/d' ? null : Number(m[2]), model: '', effort: '', unchanged: !m[3], at: Date.now() }
   for (const part of String(m[3] ?? '').split('/').filter(Boolean)) {
     if (EFFORTS.includes(part)) r.effort = part
@@ -504,6 +516,7 @@ function readRouteStatus(text) {
 function readRouteLog(text) {
   const m = String(text).match(/jev: tier (\w+) \(([\d.]+|n\/d)\)(?: · effort ([\d.]+) → (\w+) \([^)]*\))?(?: · risky ([\d.]+|n\/d))?(?: · (\d+)ms)?/)
   if (!m) return false
+  dropDemoRoute()
   route = {
     ...(route ?? {}),
     tier: m[1],
@@ -863,9 +876,16 @@ function mergeLimits(old, fresh) {
   return [...byKind.values()].filter((r) => !r.resetsAt || Date.parse(r.resetsAt) > now).sort((a, b) => (a.kind < b.kind ? -1 : 1))
 }
 
+function dropDemoUsage() {
+  if (!demoUsage) return
+  demoUsage = false
+  usage = { context: null, rateLimits: [] }
+}
+
 async function refreshUsage($) {
   try {
     const u = await $.session.usage()
+    if (demoUsage && ((u.rateLimits ?? []).length || u.context?.percent != null)) dropDemoUsage()
     usage = { context: u.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, u.rateLimits) }
     if (u.cost) await addSpend($, u.cost.usd)
     await noteUsage($)
@@ -1123,6 +1143,21 @@ export function register(on) {
       for (const ag of [...agents.values()]) if (ag.home === 'demo') agents.delete(ag.id)
       placeBar(newBar('demo', 'Orders module', 'demo', demoStages()))
       const now = Date.now()
+      if (!route) {
+        route = { tier: 'fast', conf: 0.89, model: '', effort: 'medium', unchanged: true, risky: 0.02, ms: 249, at: now }
+        routeHist.splice(0, routeHist.length, 'haiku', 'opus', 'sonnet', 'haiku', 'haiku', 'opus')
+        demoRoute = true
+      }
+      if (!(usage.rateLimits ?? []).length) {
+        usage = {
+          context: usage.context ?? { tokens: 124_000, window: 1_000_000, percent: 12 },
+          rateLimits: [
+            { kind: 'five_hour', percentUsed: 31, resetsAt: new Date(now + (2 * 60 + 14) * 60_000).toISOString() },
+            { kind: 'seven_day', percentUsed: 64, resetsAt: new Date(now + (3 * 24 + 5) * 3_600_000).toISOString() },
+          ],
+        }
+        demoUsage = true
+      }
       agents.set('demo-a1', { id: 'demo-a1', title: 'Map the orders tables', state: 'running', tool: 'Grep', model: 'haiku', startedAt: now, endedAt: null, depth: 0, home: 'demo', todo: null })
       agents.set('demo-a2', { id: 'demo-a2', title: 'Draft the migration', state: 'running', tool: 'Read', model: 'sonnet', startedAt: now, endedAt: null, depth: 0, home: 'demo', todo: null })
       prefs.open = true
@@ -1152,7 +1187,7 @@ export function register(on) {
         }
         $.ui.invalidate('ui.render')
       })
-      reply = 'Sample plan running above the prompt.'
+      reply = 'Sample plan running above the prompt' + (demoRoute || demoUsage ? ', with sample ' + [demoRoute && 'routing', demoUsage && 'limits'].filter(Boolean).join(' and ') + ' until real ones arrive.' : '.')
     } else if (a === 'auto' && (b === 'on' || b === 'off')) prefs.auto = b === 'on'
     else if (a === 'quiet' && (b === 'on' || b === 'off')) prefs.quiet = b === 'on'
     else if (a === 'collapsed' && (b === 'chips' || b === 'text' || b === 'rings')) {
@@ -1237,6 +1272,7 @@ export function register(on) {
   })
 
   on('session.measure', async ($, e, next) => {
+    dropDemoUsage()
     usage = { context: e.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, e.rateLimits) }
     if (e.cost) await addSpend($, e.cost.usd)
     await noteUsage($)

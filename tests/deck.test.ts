@@ -27,7 +27,7 @@ const PICKER = {
 const inAnHour = () => new Date(Date.now() + 3600_000 + 14 * 60_000).toISOString()
 
 // Everything Claude Code would answer for this mod
-function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ result: 'ok' })) {
+function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ result: 'ok' }), usageValue: any = null) {
   const clock = mock.clock(on)
   on('store.get', ($, e) => ({ value: saved.get(e.key) }))
   on('store.set', ($, e) => {
@@ -41,7 +41,7 @@ function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ 
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('session.id', () => ({ value: 'session-1' }))
   on('http.fetch', () => ({ deny: 'no network in tests' }))
-  on('session.usage', () => ({
+  on('session.usage', () => usageValue ? { value: usageValue } : ({
     value: {
       startedAt: 0,
       context: { tokens: 124_000, window: 1_000_000, percent: 12 },
@@ -423,3 +423,18 @@ test('spark: limit rows carry their history and a burn rate', async ($, on) => {
   expect(await desk.find({ key: 'row-limit:five_hour' })).toBeDefined()
 })
 
+
+test('/deck demo fills in a sample route and limits in a fresh session, and real readings replace them', async ($, on) => {
+  stubs(on, undefined, undefined, { startedAt: 0, context: { window: 1_000_000 }, rateLimits: [] })
+  await start($)
+  const r = await $.command.run({ command: 'deck', args: 'demo' })
+  expect(r.text).toMatch(/sample routing and limits/)
+  let out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/⇄ Model route — /)
+  expect(out.text).toMatch(/Session · 5h — 5h · 31% used/)
+  expect(out.text).toMatch(/Weekly · 7d — 7d · 64% used/)
+  await $.session.measure({ context: { tokens: 1, window: 10, percent: 10 }, rateLimits: [{ kind: 'seven_day', percentUsed: 50, resetsAt: inAnHour() }], changed: ['rateLimits'] })
+  out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).not.toMatch(/Session · 5h/)
+  expect(out.text).toMatch(/7d · 50% used/)
+})

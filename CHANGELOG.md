@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.2
+
+- `/deck demo` now shows everything in a fresh session: a sample model route and sample 5h and 7d limits fill in until the real ones arrive, then real readings replace them.
+
 ## 0.4.1
 
 - Removed Pet Runner (`/deck play`): it couldn't run smoothly enough inside Claude Code.
