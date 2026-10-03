@@ -39,11 +39,13 @@ function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ 
   on('agent.list', () => ({ value: [] }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('session.id', () => ({ value: 'session-1' }))
   on('http.fetch', () => ({ deny: 'no network in tests' }))
   on('session.usage', () => ({
     value: {
       startedAt: 0,
       context: { tokens: 124_000, window: 1_000_000, percent: 12 },
+      cost: { usd: 0.42 },
       rateLimits: [
         { kind: 'five_hour', percentUsed: 31, resetsAt: inAnHour() },
         { kind: 'seven_day', percentUsed: 64, resetsAt: inAnHour() },
@@ -388,4 +390,57 @@ test('desktop rows fade in while they unfold', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const row = await ui.find({ key: 'row-bar:todo' })
   expect(JSON.stringify(row)).toMatch(/@keyframes rin/)
+})
+
+test('rings: a ring per limit with its reset, and spend when cost is on', async ($, on) => {
+  const { saved } = stubs(on)
+  await start($)
+  await $.command.run({ command: 'deck', args: 'pet off' })
+  await $.command.run({ command: 'deck', args: 'cost on' })
+  await $.command.run({ command: 'deck', args: 'collapsed rings' })
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: '31%' })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /^5h · resets 1h1\dm$/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: '$0.42' })).toBeDefined()
+  await term.unmount()
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const ring = await desk.find({ type: 'Svg' })
+  expect(ring.props.alt).toBe('5h 31% used')
+  expect(ring.props.source).toMatch(/stroke-dasharray/)
+  expect((saved.get('spend') as any).dayUsd).toBe(0.42)
+})
+
+test('spark: limit rows carry their history and a burn rate', async ($, on) => {
+  const { clock } = stubs(on)
+  await start($)
+  await $.command.run({ command: 'deck', args: 'style spark' })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  await clock.advance(1000)
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: /5h · 31% used/ })).toBeDefined()
+  await term.unmount()
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await desk.find({ key: 'row-limit:five_hour' })).toBeDefined()
+})
+
+test('Pet Runner: opens, scores while Claude works, waits when Claude needs you, and saves the best score', async ($, on) => {
+  const { clock, saved } = stubs(on)
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  await start($)
+  await $.turn.start({ text: 'work', turnId: 't1' })
+  await $.command.run({ command: 'deck', args: 'play' })
+  await clock.advance(500)
+  const PLAY = { ...BAND, component: 'Pane', requestId: 'deck-play', props: { title: 'Pet Runner', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 12 }, view: {} } }
+  let ui = await $.ui.mount({ ...PLAY, surface: 'terminal' })
+  expect(await ui.find({ type: 'Image' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Claude is working · score counts' })).toBeDefined()
+  await ui.press({ key: 'game-jump' })
+  await ui.unmount()
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf x' } })
+  await clock.advance(800)
+  ui = await $.ui.mount({ ...PLAY, surface: 'desktop' })
+  expect(await ui.find({ type: 'Text', text: 'Claude needs you · the game waits' })).toBeDefined()
+  expect((await ui.find({ type: 'Svg' })).props.source).toMatch(/Claude needs you/)
+  void saved
 })

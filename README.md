@@ -55,13 +55,18 @@ Mods need Claude Code 2.1.286 or later. To try it from a clone without installin
 | **Activity bar** | What Claude is doing right now (`Editing auth.ts · 14 tools · 1m 12s`) | Any turn without a todo list |
 | **Agent strips** | Each subagent's current tool, its model, elapsed time | Subagents, under the bar that started them |
 | **Context** | Tokens used out of the window | Your session |
-| **5h and 7d limits** | Percent used and a live countdown to each reset | Your plan's rate limits, no `/usage` needed |
+| **5h and 7d limits** | Percent used, a live countdown to each reset, and how fast you're burning it (`+12%/h`) | Your plan's rate limits, no `/usage` needed |
+| **Spend** (optional) | What you've spent today and this month | Your session cost, added up across sessions. Turn on with `/deck cost on`; it matters on a pay-per-use API key |
 | **Model route** | Which model and effort a router picked, and how sure it was | [jev-model-router](#model-routing), if installed |
 | **Clock and weather** | Local time and the weather where you are | Open-Meteo, no key |
 
 When something needs you (a permission prompt, a question, a reply ending in `?`), its row turns amber, a collapsed Deck opens by itself, and a soft alert plays. Steps tick, finished bars chime, and the last one plays a little fanfare.
 
-**Collapsed**, Deck is one line ordered by what matters: anything waiting on you, then your **5h and 7d limits**, context, the current task, and the route. Pick its look with `/deck collapsed chips` (chips with mini bars) or `/deck collapsed text` (one plain status line, with the clock and weather at its end).
+**Collapsed**, Deck is one line ordered by what matters: anything waiting on you, then your **5h and 7d limits**, context, the current task, and the route. Pick its look:
+
+- `/deck collapsed chips`: chips with mini bars (the default)
+- `/deck collapsed text`: one plain status line, with the clock and weather at its end
+- `/deck collapsed rings`: a ring per limit with its reset time, plus spend: `◔ 14% 5h · resets 1h7m   ◕ 83% 7d · resets 3h47m   $ $0.10 today · $4.30 mo`
 
 **Styles.** Pick how the bars look with `/deck style`, a picker with live previews. Each app keeps its own choice.
 
@@ -72,6 +77,18 @@ When something needs you (a permission prompt, a question, a reply ending in `?`
 | Line | `━━━━╸────` | thin line with a pulsing head |
 | Solid | filled bar with the text inside | filled bar with a light sweep |
 | Dots | `●─●─◉┄○` one per step | step dots |
+| Spark | slim bar and a `▁▂▃▅▇` history of the last hour | slim bar and a live sparkline, with the burn rate |
+
+## Pet Runner
+
+`/deck play` opens a tiny game: the pet runs, you press **j** to jump over bugs. It's for while you wait on Claude, and it's built not to make you miss anything:
+
+- The score only counts while Claude is working.
+- The moment Claude needs you (a permission prompt or a question), the game freezes and the pet raises its **!**.
+- When the task finishes you get a "done" screen with your score; your best score is saved.
+- **p** pauses, **Esc** returns to the prompt.
+
+It's an SVG pane on Desktop and a picture in terminals that show images (Ghostty, Kitty, WezTerm, iTerm2).
 
 ## The pet
 
@@ -85,10 +102,12 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 |---|---|
 | `/deck`, `0` in an empty prompt, or the **Deck** footer button | Collapse or expand |
 | `/deck style` | Style picker with live previews (keys 1–5) |
-| `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel` |
+| `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel`, `spark` |
 | `/deck <section> on\|off` | `plans agents context limits route pet clock weather all` |
 | `/deck city <name>` | Weather city |
-| `/deck collapsed chips\|text` | Collapsed look: chips with mini bars, or one plain status line |
+| `/deck collapsed chips\|text\|rings` | Collapsed look: chips with mini bars, one plain line, or limit rings |
+| `/deck cost on\|off` | Track spend today and this month |
+| `/deck play` | Pet Runner |
 | `/deck auto on\|off` | Open by itself when something needs you |
 | `/deck sound on\|off` | Sounds |
 | `/deck quiet on\|off` | Hide the router's own lines while Deck shows the route |

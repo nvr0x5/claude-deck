@@ -2,8 +2,8 @@
 // The pixel style and the strips adapt plan-progress (zycck/claude-mods, MIT, Kirill Serditov).
 import { STYLE, hash, seedOf, esc, textWidth, hex, mix, rgb } from './theme.js'
 
-export const DESKTOP_STYLES = ['pixel', 'segments', 'line', 'solid', 'dots']
-export const DESKTOP_STYLE_NAMES = { pixel: 'Pixel', segments: 'Segments', line: 'Line', solid: 'Solid', dots: 'Dots' }
+export const DESKTOP_STYLES = ['pixel', 'segments', 'line', 'solid', 'dots', 'spark']
+export const DESKTOP_STYLE_NAMES = { pixel: 'Pixel', segments: 'Segments', line: 'Line', solid: 'Solid', dots: 'Dots', spark: 'Spark' }
 
 const H = 22
 const FONT = "'Anthropic Sans',ui-sans-serif,system-ui,-apple-system,sans-serif"
@@ -200,7 +200,34 @@ function dots(row, W, nowMs, lastHead) {
   return `<style>${twinkleCss(nowMs, false)}</style>${out}${label(row, x + 6, color)}`
 }
 
-const FN = { pixel, segments, line, solid, dots }
+// a slim bar, a sparkline of recent history ending in a dot, then the label and its rate
+function spark(row, W, nowMs, lastHead) {
+  const color = STYLE[row.style].desk
+  const bw = Math.max(60, Math.round(W * 0.26))
+  const fx = (row.pct / 100) * bw
+  const from = glideFrom(lastHead, row.id, fx)
+  const glide = Math.abs(from - fx) > 0.5 ? `<animate attributeName="width" from="${from.toFixed(1)}" to="${fx.toFixed(1)}" dur=".45s" ${EASE} fill="freeze"/>` : ''
+  let out = `<rect x="0" y="7" width="${bw}" height="8" rx="4" fill="#808080" fill-opacity=".2"/><rect x="0" y="7" width="${fx.toFixed(1)}" height="8" rx="4" fill="${color}">${glide}</rect>`
+  const sw = Math.max(60, Math.round(W * 0.3))
+  const sx = bw + 14
+  const hist = (row.hist ?? []).slice(-30)
+  if (hist.length > 1) {
+    const lo = Math.min(...hist)
+    const hi = Math.max(...hist)
+    const pts = hist.map((v, i) => [sx + (i * sw) / (hist.length - 1), 18 - ((v - lo) / Math.max(1e-9, hi - lo)) * 14])
+    out += `<path d="${pts.map(([x, y], i) => (i ? 'L' : 'M') + x.toFixed(1) + ',' + y.toFixed(1)).join(' ')}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/>`
+    const [lx, ly] = pts[pts.length - 1]
+    out += `<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.6" fill="${color}"><animate attributeName="r" values="2.6;3.6;2.6" dur="1.6s" repeatCount="indefinite"/></circle>`
+  } else {
+    out += `<rect x="${sx}" y="10.5" width="${sw}" height="1" fill="#808080" fill-opacity=".3"/>`
+  }
+  const lx = sx + sw + 14
+  out += `<text x="${lx}" y="15" style="font:500 12px ${FONT};fill:${color}">${esc(row.name)}${row.rate ? `<tspan dx="8" style="font-weight:400;fill:#9a9893">${esc(row.rate)}</tspan>` : row.count ? `<tspan dx="6" style="font-weight:400;fill:#9a9893">${esc(row.count)}</tspan>` : ''}</text>`
+  void nowMs
+  return out
+}
+
+const FN = { pixel, segments, line, solid, dots, spark }
 
 export function desktopTrack(style, row, W, nowMs, lastHead) {
   return (FN[style] ?? pixel)(row, W, nowMs, lastHead)

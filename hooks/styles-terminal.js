@@ -1,8 +1,8 @@
 // Terminal bar styles. Each returns exactly W cells for a row. Pure, no $.
 import { STYLE, TRACK, TRACK_BG, TICK_ON, TICK_OFF, MUTED, hash, seedOf, trunc, textCells } from './theme.js'
 
-export const TERMINAL_STYLES = ['segments', 'line', 'solid', 'dots', 'pixel']
-export const TERMINAL_STYLE_NAMES = { segments: 'Segments', line: 'Line', solid: 'Solid', dots: 'Dots', pixel: 'Pixel dots' }
+export const TERMINAL_STYLES = ['segments', 'line', 'solid', 'dots', 'pixel', 'spark']
+export const TERMINAL_STYLE_NAMES = { segments: 'Segments', line: 'Line', solid: 'Solid', dots: 'Dots', pixel: 'Pixel dots', spark: 'Spark' }
 
 const DOTS = '⠁⠂⠄⠈⠃⠅⠉⠑⠆⠊⠒⠇⠋⠓⠧⠏⠗⠯⠷⠿⡿⣟⣯⣷⣽⣾⣿'
 
@@ -120,7 +120,32 @@ function pixel(row, W, frame) {
   return cells
 }
 
-const FN = { segments, line, solid, dots, pixel }
+const BLOCKS = '▁▂▃▄▅▆▇█'
+
+// a thin bar, then the recent history as a sparkline, then the label and how fast it moves
+function spark(row, W, frame) {
+  const st = STYLE[row.style]
+  const hist = (row.hist ?? []).slice(-24)
+  const bw = Math.max(6, Math.min(18, Math.round(W * 0.22)))
+  const f = Math.round((bw * row.pct) / 100)
+  const cells = []
+  for (let x = 0; x < bw; x++) cells.push({ ch: x < f ? '━' : '─', color: x < f ? st.fill : TRACK })
+  cells.push({ ch: ' ', color: TRACK })
+  if (hist.length > 1) {
+    const lo = Math.min(...hist)
+    const hi = Math.max(...hist)
+    for (const v of hist) cells.push({ ch: BLOCKS[Math.round(((v - lo) / Math.max(1e-9, hi - lo)) * 7)], color: st.fill })
+  } else if (row.animating) {
+    for (let i = 0; i < 8; i++) cells.push({ ch: BLOCKS[(i + frame) % 8], color: st.fill })
+  }
+  const out = [...cells, ...textCells('  ', MUTED), ...textCells(trunc(row.name, 24), st.fill)]
+  if (row.rate) out.push(...textCells('  ' + row.rate, MUTED))
+  else if (row.count) out.push(...textCells(' ' + row.count, MUTED))
+  while (out.length < W) out.push({ ch: ' ', color: MUTED })
+  return out.slice(0, W)
+}
+
+const FN = { segments, line, solid, dots, pixel, spark }
 
 export function terminalBar(style, row, W, frame) {
   return (FN[style] ?? solid)(row, W, frame)
@@ -135,6 +160,7 @@ export function terminalMini(style, row, W) {
     if (style === 'solid' || style === 'pixel') cells.push({ ch: ' ', color: st.fill, bg: x < f ? st.fill : TRACK_BG })
     else if (style === 'line') cells.push({ ch: x < f ? '━' : '─', color: x < f ? st.fill : TRACK })
     else if (style === 'dots') cells.push({ ch: x < f ? '●' : '○', color: x < f ? st.fill : TICK_OFF })
+    else if (style === 'spark') cells.push({ ch: x < f ? '━' : '─', color: x < f ? st.fill : TRACK })
     else cells.push({ ch: x < f ? '▰' : '▱', color: x < f ? st.fill : TRACK })
   }
   return cells

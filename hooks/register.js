@@ -9,6 +9,7 @@ import { STYLE, TIER, TRACK, DIM, MUTED, TEXT, trunc, textWidth, esc, runs, text
 import { TERMINAL_STYLES, TERMINAL_STYLE_NAMES, terminalBar, terminalMini } from './styles-terminal.js'
 import { DESKTOP_STYLES, DESKTOP_STYLE_NAMES, desktopTrack, stripsSvg, stripsHeight } from './styles-desktop.js'
 import { createPet, stepPet, petX, petLaneSvg, petFrame, PET_RASTER } from './pet.js'
+import { newGame, step as stepGame, jump as jumpGame, gameSvg, gameRgba, gameStatus } from './game.js'
 
 const SECTIONS = ['plans', 'agents', 'context', 'limits', 'route', 'pet', 'clock', 'weather']
 
@@ -19,7 +20,8 @@ const DEFAULT_PREFS = {
   auto: true,
   sound: true,
   quiet: true,
-  collapsed: 'chips', // 'chips' (mini bars) or 'text' (one plain status line)
+  collapsed: 'chips', // 'chips' (mini bars), 'text' (one plain status line) or 'rings' (limit rings and cost)
+  cost: false, // track spend today and this month (pay-per-use API keys)
   city: null, // { name, lat, lon }
 }
 
@@ -133,6 +135,61 @@ function activityRow(now) {
   }
 }
 
+// usage history, for sparklines and burn rates: key -> [{ t, p }]
+let hist = {}
+const HIST_KEEP_MS = 26 * 3600_000
+
+function sampleUsage(now) {
+  const add = (key, p) => {
+    if (p == null) return false
+    const list = (hist[key] = hist[key] ?? [])
+    const last = list[list.length - 1]
+    if (last && last.p === p && now - last.t < 300_000) return false
+    if (last && now - last.t < 20_000) last.p = p
+    else list.push({ t: now, p })
+    while (list.length && now - list[0].t > HIST_KEEP_MS) list.shift()
+    if (list.length > 400) list.splice(0, list.length - 400)
+    return true
+  }
+  let changed = add('context', usage.context?.percent)
+  for (const rl of usage.rateLimits ?? []) changed = add(rl.kind, rl.percentUsed) || changed
+  return changed
+}
+
+// the values over a window, for a sparkline; the newest point is now
+function series(key, windowMs, now) {
+  const list = (hist[key] ?? []).filter((x) => now - x.t <= windowMs)
+  return list.map((x) => x.p)
+}
+
+// how fast a window moves: percent per hour (or per day for the weekly window)
+function burnRate(key, now) {
+  const daily = key.startsWith('seven_day')
+  const list = (hist[key] ?? []).filter((x) => now - x.t <= (daily ? 24 : 1) * 3600_000)
+  if (list.length < 2) return ''
+  const a = list[0]
+  const b = list[list.length - 1]
+  const span = b.t - a.t
+  if (span < 5 * 60_000 || b.p < a.p) return ''
+  const per = ((b.p - a.p) / span) * (daily ? 86_400_000 : 3_600_000)
+  if (per < 0.05) return ''
+  return '+' + (per < 10 ? per.toFixed(1) : Math.round(per)) + (daily ? '%/day' : '%/h')
+}
+
+// spend: this session's running total, added into today and this month across sessions
+let sessionId = ''
+let costSeen = null
+let spend = { day: '', dayUsd: 0, month: '', monthUsd: 0 }
+const today = () => {
+  const d = new Date()
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+}
+const fmtUsd = (v) => '$' + (v < 100 ? v.toFixed(2) : Math.round(v))
+
+// Pet Runner
+let game = null
+let gameTimer = null
+
 // open and close unfold row by row instead of jumping
 let fold = null // { dir: 'open' | 'close', start, timer }
 const FOLD_STEP = 35
@@ -199,6 +256,15 @@ function countdown(iso) {
   s = s % 60
   if (d > 0) return d + 'd ' + h + 'h ' + String(m).padStart(2, '0') + 'm'
   return h + ':' + String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0')
+}
+
+// "1h7m", "3d 5h", "42m": for the rings, where seconds would only flicker
+function humanReset(iso) {
+  const s = Math.max(0, Math.floor((Date.parse(iso) - Date.now()) / 1000))
+  const d = Math.floor(s / 86400)
+  const h = Math.floor((s % 86400) / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return d > 0 ? d + 'd ' + h + 'h' : h > 0 ? h + 'h' + m + 'm' : m + 'm'
 }
 
 function shortCountdown(iso) {
@@ -590,6 +656,8 @@ function collectRows(now) {
       right: Math.round(p) + '%',
       short: 'ctx ' + Math.round(p) + '%',
       section: 'context',
+      hist: series('context', 3600_000, now),
+      rate: burnRate('context', now),
     })
   }
   if (prefs.show.limits) {
@@ -609,6 +677,10 @@ function collectRows(now) {
         right: rl.resetsAt ? '↻ ' + countdown(rl.resetsAt) : '',
         short: tag + ' ' + Math.round(p) + '%' + (rl.resetsAt ? ' ↻' + shortCountdown(rl.resetsAt) : ''),
         section: 'limits',
+        kindKey: rl.kind,
+        resets: rl.resetsAt ? humanReset(rl.resetsAt) : '',
+        hist: series(rl.kind, rl.kind.startsWith('seven_day') ? 24 * 3600_000 : 3600_000, now),
+        rate: burnRate(rl.kind, now),
       })
     }
   }
@@ -700,6 +772,25 @@ function routeSvg(row, W) {
   return out
 }
 
+// a small progress ring with an icon in the middle
+function ringSvg(pct, color, icon) {
+  const r = 8.5
+  const C = 2 * Math.PI * r
+  const glyph =
+    icon === 'usd'
+      ? `<text x="11" y="15" text-anchor="middle" style="font:600 10px ui-sans-serif,system-ui,sans-serif;fill:${color}">$</text>`
+      : icon === 'week'
+        ? `<rect x="7.2" y="7.6" width="7.6" height="7" rx="1.2" fill="none" stroke="${color}" stroke-width="1.3"/><rect x="7.2" y="7.6" width="7.6" height="2" fill="${color}"/>`
+        : `<path d="M11 7.2V11l2.4 1.6" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round"/>`
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 22 22">` +
+    `<circle cx="11" cy="11" r="${r}" fill="none" stroke="#808080" stroke-opacity=".3" stroke-width="2.2"/>` +
+    `<circle cx="11" cy="11" r="${r}" fill="none" stroke="${color}" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="${((C * Math.min(100, pct)) / 100).toFixed(1)} ${C.toFixed(1)}" transform="rotate(-90 11 11)"/>` +
+    glyph +
+    '</svg>'
+  )
+}
+
 function rowSvg(row, W, nowMs) {
   const stripsH = row.strips ? 5 + stripsHeight(row.strips) : 0
   const H = TRACK_H + stripsH
@@ -781,7 +872,76 @@ async function refreshUsage($) {
   try {
     const u = await $.session.usage()
     usage = { context: u.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, u.rateLimits) }
+    if (u.cost) await addSpend($, u.cost.usd)
+    await noteUsage($)
   } catch {}
+}
+
+async function noteUsage($) {
+  if (sampleUsage(Date.now())) await $.store.set('hist', hist)
+}
+
+// add what this session spent since the last reading into today and this month
+async function addSpend($, usd) {
+  if (!prefs.cost || typeof usd !== 'number') return
+  if (costSeen == null) {
+    const seen = (await $.store.get('costSeen')) ?? {}
+    costSeen = typeof seen[sessionId] === 'number' ? seen[sessionId] : 0
+  }
+  const delta = usd >= costSeen ? usd - costSeen : usd
+  costSeen = usd
+  const saved = (await $.store.get('spend')) ?? {}
+  const day = today()
+  const month = day.slice(0, 7)
+  spend = {
+    day,
+    dayUsd: (saved.day === day ? saved.dayUsd : 0) + delta,
+    month,
+    monthUsd: (saved.month === month ? saved.monthUsd : 0) + delta,
+  }
+  if (delta > 0) {
+    await $.store.set('spend', spend)
+    const seen = (await $.store.get('costSeen')) ?? {}
+    seen[sessionId] = usd
+    const ids = Object.keys(seen)
+    if (ids.length > 30) for (const id of ids.slice(0, ids.length - 30)) delete seen[id]
+    await $.store.set('costSeen', seen)
+  }
+}
+
+async function loadSpend($) {
+  const saved = (await $.store.get('spend')) ?? {}
+  const day = today()
+  spend = { day, dayUsd: saved.day === day ? saved.dayUsd : 0, month: day.slice(0, 7), monthUsd: saved.month === day.slice(0, 7) ? saved.monthUsd : 0 }
+}
+
+// ---------- Pet Runner ----------
+
+async function openGame($) {
+  if (!game) game = newGame(Number((await $.store.get('best')) ?? 0))
+  game.paused = false
+  if (gameTimer) gameTimer.cancel()
+  gameTimer = $.clock.every(50, async () => {
+    if (!game) return
+    const asking = collectRows(Date.now()).some((r) => r.state === 'needs_input')
+    if (asking && game.mode === 'run') game.mode = 'ask'
+    else if (!asking && game.mode === 'ask') game.mode = 'run'
+    const before = game.best
+    stepGame(game, turnActive)
+    if (game.best > before) await $.store.set('best', game.best)
+    $.ui.invalidate('ui.render')
+  })
+  await $.ui.open({ id: 'deck-play', title: 'Pet Runner', focus: true, closeOnEscape: true, rows: 14 })
+}
+
+async function finishGame($) {
+  if (!game || game.mode !== 'run' || game.score === 0) return
+  game.mode = 'done'
+  if (game.score > game.best) {
+    game.best = game.score
+    await $.store.set('best', game.best)
+  }
+  $.ui.invalidate('ui.render')
 }
 
 async function refreshWeather($) {
@@ -879,7 +1039,9 @@ const HELP = [
   '/deck <section> on|off     sections: ' + SECTIONS.join(', ') + ', all',
   '/deck city <name>          set the weather city (turns weather on)',
   "/deck quiet on|off         hide the router's own status and log lines while the HUD shows the route",
-  '/deck collapsed chips|text how the collapsed line looks: chips with mini bars, or one plain status line',
+  '/deck collapsed chips|text|rings  collapsed look: chips with mini bars, one plain line, or limit rings',
+  '/deck cost on|off         track spend today and this month (pay-per-use API keys)',
+  '/deck play                Pet Runner: jump over bugs while Claude works (j jump, p pause, Esc back)',
   '/deck auto on|off          expand when something needs you',
   '/deck sound on|off',
   '/deck demo                 play a sample plan with agents',
@@ -913,6 +1075,12 @@ export function register(on) {
     }
     await refreshUsage($)
     await readSessionModel($)
+    const savedHist = await $.store.get('hist')
+    if (savedHist && typeof savedHist === 'object') hist = savedHist
+    try {
+      sessionId = await $.session.id()
+    } catch {}
+    await loadSpend($)
     refreshWeather($).catch(() => {})
 
     $.clock.every(150, async () => {
@@ -928,6 +1096,7 @@ export function register(on) {
       if (petMoved || terminalAnim || ticking) $.ui.invalidate('ui.render')
       if (frame % 14 === 0) await syncAgents($)
       if (frame % 400 === 0) await refreshUsage($)
+      else if (frame % 100 === 0) await noteUsage($)
       if (frame % 8000 === 0) await refreshWeather($)
     })
 
@@ -939,6 +1108,15 @@ export function register(on) {
         immediate: true,
       })
     } catch {}
+    return next(e)
+  })
+
+  on('ui.close', async ($, e, next) => {
+    if (e.id === 'deck-play') {
+      if (gameTimer) gameTimer.cancel()
+      gameTimer = null
+      if (game && game.mode === 'run') game.paused = true
+    }
     return next(e)
   })
 
@@ -1019,10 +1197,17 @@ export function register(on) {
       reply = 'Sample plan running above the prompt.'
     } else if (a === 'auto' && (b === 'on' || b === 'off')) prefs.auto = b === 'on'
     else if (a === 'quiet' && (b === 'on' || b === 'off')) prefs.quiet = b === 'on'
-    else if (a === 'collapsed' && (b === 'chips' || b === 'text')) {
+    else if (a === 'collapsed' && (b === 'chips' || b === 'text' || b === 'rings')) {
       prefs.collapsed = b
       prefs.open = false
-      reply = b === 'text' ? 'Collapsed Deck is now one plain status line.' : 'Collapsed Deck now shows chips with mini bars.'
+      reply = { chips: 'Collapsed Deck now shows chips with mini bars.', text: 'Collapsed Deck is now one plain status line.', rings: 'Collapsed Deck now shows limit rings' + (prefs.cost ? ' and spend.' : '. Add spend with /deck cost on.') }[b]
+    } else if (a === 'cost' && (b === 'on' || b === 'off')) {
+      prefs.cost = b === 'on'
+      if (prefs.cost) await refreshUsage($)
+      reply = prefs.cost ? 'Tracking spend today and this month. It only means something on a pay-per-use API key.' : 'Spend tracking off.'
+    } else if (a === 'play') {
+      await openGame($)
+      return {}
     }
     else if (a === 'sound' && (b === 'on' || b === 'off')) {
       prefs.sound = b === 'on'
@@ -1098,6 +1283,8 @@ export function register(on) {
 
   on('session.measure', async ($, e, next) => {
     usage = { context: e.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, e.rateLimits) }
+    if (e.cost) await addSpend($, e.cost.usd)
+    await noteUsage($)
     $.ui.invalidate('ui.render')
     return next(e)
   })
@@ -1164,6 +1351,7 @@ export function register(on) {
       $.ui.invalidate('ui.render')
     }
     if (!e.agentId) {
+      await finishGame($)
       if (activity && !activity.done) {
         activity.done = true
         activity.doneAt = Date.now()
@@ -1289,6 +1477,49 @@ export function register(on) {
 
   // the style picker: every style, drawn with a real bar, one key each
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
+    if (e.requestId === 'deck-play') {
+      const { Box, Text, Button, Svg, Image } = $.ui.resolve(e)
+      const g = game ?? newGame()
+      const desktop = e.surface === 'desktop'
+      const cols = Math.max(40, e.props.bodyColumns ?? 80)
+      const nowMs = Date.now()
+      const status = gameStatus(g, turnActive)
+      const tone = { ask: STYLE.ask.fill, done: STYLE.done.fill, hot: STYLE.hot.fill, mute: MUTED }[status.tone]
+      const scene = desktop
+        ? Svg({ source: gameSvg(g, Math.min(760, cols * 8 - 24), nowMs), alt: 'Pet Runner, score ' + g.score, width: Math.min(760, cols * 8 - 24), height: Math.round((Math.min(760, cols * 8 - 24) * 80) / 320) })
+        : Image({ key: 'game', source: { rgba: toBase64(gameRgba(g, Math.min(cols - 2, 80), 8, nowMs)), width: Math.min(cols - 2, 80) * 4, height: 64 }, columns: Math.min(cols - 2, 80), rows: 8, alt: 'Pet Runner, score ' + g.score })
+      return Box({
+        flexDirection: 'column',
+        children: [
+          scene,
+          Box({
+            flexDirection: 'row',
+            columnGap: 2,
+            children: [
+              Text({ color: tone, children: [status.text] }),
+              Box({ flexGrow: 1, children: [] }),
+              Text({ color: TEXT, children: [String(g.score).padStart(5, '0')] }),
+              Text({ color: DIM, children: ['best ' + String(g.best).padStart(5, '0')] }),
+            ],
+          }),
+          Box({
+            flexDirection: 'row',
+            columnGap: 2,
+            children: [
+              Button({ key: 'game-jump', label: 'Jump', hotkey: 'j', plain: true, autoFocus: true, onPress: () => {
+                if (game) jumpGame(game)
+                $.ui.invalidate('ui.render')
+              } }),
+              Button({ key: 'game-pause', label: 'Pause', hotkey: 'p', plain: true, onPress: () => {
+                if (game && game.mode === 'run') game.paused = !game.paused
+                $.ui.invalidate('ui.render')
+              } }),
+              Text({ color: DIM, children: ['Esc back to Claude'] }),
+            ],
+          }),
+        ],
+      })
+    }
     if (e.requestId !== 'deck-style') return next(e)
     const { Box, Text, Button, Svg } = $.ui.resolve(e)
     const desktop = e.surface === 'desktop'
@@ -1395,6 +1626,51 @@ export function register(on) {
     })
     const extrasText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [extras.join('  ·  ')] })] })
     const spacer = Box({ flexGrow: 1, children: [] })
+
+    // ----- collapsed, rings: a ring per limit, its reset, and spend -----
+    if ((!prefs.open || !rows.length) && prefs.collapsed === 'rings') {
+      const items = []
+      const ask = rows.find((r) => r.state === 'needs_input')
+      if (ask) items.push(Text({ color: STYLE.ask.fill, children: ['? ' + trunc(ask.title, 24) + ' needs you'] }))
+      for (const row of rows.filter((r) => r.limit)) {
+        const st = STYLE[row.style]
+        const tag = row.kindKey === 'five_hour' ? '5h' : row.kindKey === 'seven_day' ? '7d' : row.title
+        const ring = desktop
+          ? Svg({ alt: tag + ' ' + Math.round(row.pct) + '% used', width: 22, height: 22, source: ringSvg(row.pct, st.desk, row.kindKey === 'seven_day' ? 'week' : 'clock') })
+          : Text({ color: st.fill, children: ['○◔◑◕●'[Math.min(4, Math.round(row.pct / 25))]] })
+        items.push(
+          Box({
+            flexDirection: 'row',
+            columnGap: 1,
+            alignItems: 'center',
+            children: [ring, Text({ color: TEXT, bold: true, children: [Math.round(row.pct) + '%'] }), Text({ color: MUTED, children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
+          }),
+        )
+      }
+      if (prefs.cost) {
+        items.push(
+          Box({
+            flexDirection: 'row',
+            columnGap: 1,
+            alignItems: 'center',
+            children: [
+              desktop ? Svg({ alt: 'spend', width: 22, height: 22, source: ringSvg(100, STYLE.done.desk, 'usd') }) : Text({ color: STYLE.done.fill, children: ['$'] }),
+              Text({ color: STYLE.done.fill, bold: true, children: [fmtUsd(spend.dayUsd)] }),
+              Text({ color: MUTED, children: ['today · ' + fmtUsd(spend.monthUsd) + ' mo'] }),
+            ],
+          }),
+        )
+      }
+      const busy = rows.find((r) => (r.kind === 'bar' || r.kind === 'activity') && r.animating && r.state !== 'needs_input')
+      if (busy) items.push(Text({ color: MUTED, children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] }))
+      const line = Box({
+        flexDirection: 'row',
+        columnGap: desktop ? 4 : 3,
+        alignItems: 'center',
+        children: [...(rows.length ? [toggle] : []), ...items, spacer, extrasText],
+      })
+      return Box({ flexDirection: 'column', children: [...lane, line] })
+    }
 
     // ----- collapsed, text: one plain status line, clock and weather at its end -----
     if ((!prefs.open || !rows.length) && prefs.collapsed === 'text') {

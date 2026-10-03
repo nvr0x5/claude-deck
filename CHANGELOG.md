@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0
+
+- **Rings**: a third collapsed look, `/deck collapsed rings`, with a ring per limit, its reset time, and spend.
+- **Spend**: `/deck cost on` adds up what you spend today and this month across sessions (for pay-per-use API keys).
+- **Spark**: a sixth bar style. Limits and context show a sparkline of recent history and a burn rate (`+12%/h`, `+5%/day`).
+- **Pet Runner**: `/deck play`, a jump-over-the-bugs game that scores while Claude works and freezes when Claude needs you.
+- Usage history is kept across sessions, so sparklines and rates survive a restart.
+
 ## 0.3.3
 
 - Opening and closing Deck animate: rows unfold one after another (and fold back up on close). On Desktop each row also fades and rises in. Works from `0`, the footer button, `/deck`, and auto-expand.
