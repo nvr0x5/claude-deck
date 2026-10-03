@@ -70,6 +70,10 @@ When something needs you (a permission prompt, a question, a reply ending in `?`
 
 **Styles.** Pick how the bars look with `/deck style`, a picker with live previews. Each app keeps its own choice.
 
+<p align="center">
+  <img src="assets/styles.svg" alt="Every Deck bar style (pixel, segments, line, solid, dots, spark) on Desktop and in the terminal, and the three collapsed looks: chips, text and rings." width="860">
+</p>
+
 | Style | CLI | Desktop |
 |---|---|---|
 | Pixel | braille dots and a colored pill | twinkling pixels and a gliding pill |
@@ -78,17 +82,6 @@ When something needs you (a permission prompt, a question, a reply ending in `?`
 | Solid | filled bar with the text inside | filled bar with a light sweep |
 | Dots | `●─●─◉┄○` one per step | step dots |
 | Spark | slim bar and a `▁▂▃▅▇` history of the last hour | slim bar and a live sparkline, with the burn rate |
-
-## Pet Runner
-
-`/deck play` opens a tiny game: the pet runs, you press **j** to jump over bugs. It's for while you wait on Claude, and it's built not to make you miss anything:
-
-- The score only counts while Claude is working.
-- The moment Claude needs you (a permission prompt or a question), the game freezes and the pet raises its **!**.
-- When the task finishes you get a "done" screen with your score; your best score is saved.
-- **p** pauses, **Esc** returns to the prompt.
-
-It's an SVG pane on Desktop and a picture in terminals that show images (Ghostty, Kitty, WezTerm, iTerm2).
 
 ## The pet
 
@@ -107,7 +100,6 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck city <name>` | Weather city |
 | `/deck collapsed chips\|text\|rings` | Collapsed look: chips with mini bars, one plain line, or limit rings |
 | `/deck cost on\|off` | Track spend today and this month |
-| `/deck play` | Pet Runner |
 | `/deck auto on\|off` | Open by itself when something needs you |
 | `/deck sound on\|off` | Sounds |
 | `/deck quiet on\|off` | Hide the router's own lines while Deck shows the route |
@@ -150,7 +142,7 @@ Deck makes two kinds of network request, both to Open-Meteo and only when you se
 ```bash
 claude plugin validate ./claude-deck
 cd claude-deck && claude plugin test
-node assets/make-banner.mjs && node assets/make-demo.mjs && node assets/make-social.mjs
+node assets/make-banner.mjs && node assets/make-demo.mjs && node assets/make-styles.mjs && node assets/make-social.mjs
 ```
 
 The banner, the demo and the social card are generated from the mod's own drawing code, so they always match what Deck really draws.

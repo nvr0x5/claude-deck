@@ -125,8 +125,11 @@ const BLOCKS = '▁▂▃▄▅▆▇█'
 // a thin bar, then the recent history as a sparkline, then the label and how fast it moves
 function spark(row, W, frame) {
   const st = STYLE[row.style]
-  const hist = (row.hist ?? []).slice(-24)
-  const bw = Math.max(6, Math.min(18, Math.round(W * 0.22)))
+  // the label and rate always fit; the bar and sparkline get whatever room is left
+  const tail = trunc(row.name, 24).length + (row.rate ? row.rate.length + 2 : row.count ? row.count.length + 1 : 0) + 3
+  const bw = Math.max(3, Math.min(18, Math.round(W * 0.22), W - tail - 1))
+  const room = Math.max(0, Math.min(24, W - bw - 1 - tail))
+  const hist = room >= 4 ? (row.hist ?? []).slice(-room) : []
   const f = Math.round((bw * row.pct) / 100)
   const cells = []
   for (let x = 0; x < bw; x++) cells.push({ ch: x < f ? '━' : '─', color: x < f ? st.fill : TRACK })
@@ -135,7 +138,7 @@ function spark(row, W, frame) {
     const lo = Math.min(...hist)
     const hi = Math.max(...hist)
     for (const v of hist) cells.push({ ch: BLOCKS[Math.round(((v - lo) / Math.max(1e-9, hi - lo)) * 7)], color: st.fill })
-  } else if (row.animating) {
+  } else if (row.animating && room >= 8) {
     for (let i = 0; i < 8; i++) cells.push({ ch: BLOCKS[(i + frame) % 8], color: st.fill })
   }
   const out = [...cells, ...textCells('  ', MUTED), ...textCells(trunc(row.name, 24), st.fill)]

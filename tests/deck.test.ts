@@ -423,24 +423,3 @@ test('spark: limit rows carry their history and a burn rate', async ($, on) => {
   expect(await desk.find({ key: 'row-limit:five_hour' })).toBeDefined()
 })
 
-test('Pet Runner: opens, scores while Claude works, waits when Claude needs you, and saves the best score', async ($, on) => {
-  const { clock, saved } = stubs(on)
-  on('turn.start', ($, e) => ({ turnId: e.turnId }))
-  await start($)
-  await $.turn.start({ text: 'work', turnId: 't1' })
-  await $.command.run({ command: 'deck', args: 'play' })
-  await clock.advance(500)
-  const PLAY = { ...BAND, component: 'Pane', requestId: 'deck-play', props: { title: 'Pet Runner', isFocused: true, bodyColumns: 80, placement: 'inline', scroll: { offset: 0, bodyRows: 12 }, view: {} } }
-  let ui = await $.ui.mount({ ...PLAY, surface: 'terminal' })
-  expect(await ui.find({ type: 'Image' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'Claude is working · score counts' })).toBeDefined()
-  await ui.press({ key: 'game-jump' })
-  await ui.unmount()
-  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
-  await $.tool.check({ tool: 'Bash', input: { command: 'rm -rf x' } })
-  await clock.advance(800)
-  ui = await $.ui.mount({ ...PLAY, surface: 'desktop' })
-  expect(await ui.find({ type: 'Text', text: 'Claude needs you · the game waits' })).toBeDefined()
-  expect((await ui.find({ type: 'Svg' })).props.source).toMatch(/Claude needs you/)
-  void saved
-})

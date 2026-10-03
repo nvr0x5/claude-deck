@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1
+
+- Removed Pet Runner (`/deck play`): it couldn't run smoothly enough inside Claude Code.
+- Rings: labels no longer wrap onto several lines; spend reads "today · $4.30 this month".
+- Chips: the Desktop app no longer hides a chip behind "+1" when there's room for it.
+- Collapsed countdowns read `↻2h14m` instead of ticking seconds.
+- The pet's lane is shorter, so a collapsed Deck takes less height.
+- Spark in a narrow terminal keeps the label and rate whole; the sparkline shrinks instead.
+- New `assets/styles.svg`: every bar style and collapsed look, on Desktop and in the terminal.
+
 ## 0.4.0
 
 - **Rings**: a third collapsed look, `/deck collapsed rings`, with a ring per limit, its reset time, and spend.

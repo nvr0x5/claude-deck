@@ -9,7 +9,6 @@ import { STYLE, TIER, TRACK, DIM, MUTED, TEXT, trunc, textWidth, esc, runs, text
 import { TERMINAL_STYLES, TERMINAL_STYLE_NAMES, terminalBar, terminalMini } from './styles-terminal.js'
 import { DESKTOP_STYLES, DESKTOP_STYLE_NAMES, desktopTrack, stripsSvg, stripsHeight } from './styles-desktop.js'
 import { createPet, stepPet, petX, petLaneSvg, petFrame, PET_RASTER } from './pet.js'
-import { newGame, step as stepGame, jump as jumpGame, gameSvg, gameRgba, gameStatus } from './game.js'
 
 const SECTIONS = ['plans', 'agents', 'context', 'limits', 'route', 'pet', 'clock', 'weather']
 
@@ -185,10 +184,6 @@ const today = () => {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
 const fmtUsd = (v) => '$' + (v < 100 ? v.toFixed(2) : Math.round(v))
-
-// Pet Runner
-let game = null
-let gameTimer = null
 
 // open and close unfold row by row instead of jumping
 let fold = null // { dir: 'open' | 'close', start, timer }
@@ -675,7 +670,7 @@ function collectRows(now) {
         name: tag + ' · ' + Math.round(p) + '% used',
         count: '',
         right: rl.resetsAt ? '↻ ' + countdown(rl.resetsAt) : '',
-        short: tag + ' ' + Math.round(p) + '%' + (rl.resetsAt ? ' ↻' + shortCountdown(rl.resetsAt) : ''),
+        short: tag + ' ' + Math.round(p) + '%' + (rl.resetsAt ? ' ↻' + humanReset(rl.resetsAt) : ''),
         section: 'limits',
         kindKey: rl.kind,
         resets: rl.resetsAt ? humanReset(rl.resetsAt) : '',
@@ -915,34 +910,7 @@ async function loadSpend($) {
   spend = { day, dayUsd: saved.day === day ? saved.dayUsd : 0, month: day.slice(0, 7), monthUsd: saved.month === day.slice(0, 7) ? saved.monthUsd : 0 }
 }
 
-// ---------- Pet Runner ----------
 
-async function openGame($) {
-  if (!game) game = newGame(Number((await $.store.get('best')) ?? 0))
-  game.paused = false
-  if (gameTimer) gameTimer.cancel()
-  gameTimer = $.clock.every(50, async () => {
-    if (!game) return
-    const asking = collectRows(Date.now()).some((r) => r.state === 'needs_input')
-    if (asking && game.mode === 'run') game.mode = 'ask'
-    else if (!asking && game.mode === 'ask') game.mode = 'run'
-    const before = game.best
-    stepGame(game, turnActive)
-    if (game.best > before) await $.store.set('best', game.best)
-    $.ui.invalidate('ui.render')
-  })
-  await $.ui.open({ id: 'deck-play', title: 'Pet Runner', focus: true, closeOnEscape: true, rows: 14 })
-}
-
-async function finishGame($) {
-  if (!game || game.mode !== 'run' || game.score === 0) return
-  game.mode = 'done'
-  if (game.score > game.best) {
-    game.best = game.score
-    await $.store.set('best', game.best)
-  }
-  $.ui.invalidate('ui.render')
-}
 
 async function refreshWeather($) {
   if (!prefs.city || !prefs.show.weather) return
@@ -1041,7 +1009,6 @@ const HELP = [
   "/deck quiet on|off         hide the router's own status and log lines while the HUD shows the route",
   '/deck collapsed chips|text|rings  collapsed look: chips with mini bars, one plain line, or limit rings',
   '/deck cost on|off         track spend today and this month (pay-per-use API keys)',
-  '/deck play                Pet Runner: jump over bugs while Claude works (j jump, p pause, Esc back)',
   '/deck auto on|off          expand when something needs you',
   '/deck sound on|off',
   '/deck demo                 play a sample plan with agents',
@@ -1108,15 +1075,6 @@ export function register(on) {
         immediate: true,
       })
     } catch {}
-    return next(e)
-  })
-
-  on('ui.close', async ($, e, next) => {
-    if (e.id === 'deck-play') {
-      if (gameTimer) gameTimer.cancel()
-      gameTimer = null
-      if (game && game.mode === 'run') game.paused = true
-    }
     return next(e)
   })
 
@@ -1205,9 +1163,6 @@ export function register(on) {
       prefs.cost = b === 'on'
       if (prefs.cost) await refreshUsage($)
       reply = prefs.cost ? 'Tracking spend today and this month. It only means something on a pay-per-use API key.' : 'Spend tracking off.'
-    } else if (a === 'play') {
-      await openGame($)
-      return {}
     }
     else if (a === 'sound' && (b === 'on' || b === 'off')) {
       prefs.sound = b === 'on'
@@ -1351,7 +1306,6 @@ export function register(on) {
       $.ui.invalidate('ui.render')
     }
     if (!e.agentId) {
-      await finishGame($)
       if (activity && !activity.done) {
         activity.done = true
         activity.doneAt = Date.now()
@@ -1477,49 +1431,6 @@ export function register(on) {
 
   // the style picker: every style, drawn with a real bar, one key each
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
-    if (e.requestId === 'deck-play') {
-      const { Box, Text, Button, Svg, Image } = $.ui.resolve(e)
-      const g = game ?? newGame()
-      const desktop = e.surface === 'desktop'
-      const cols = Math.max(40, e.props.bodyColumns ?? 80)
-      const nowMs = Date.now()
-      const status = gameStatus(g, turnActive)
-      const tone = { ask: STYLE.ask.fill, done: STYLE.done.fill, hot: STYLE.hot.fill, mute: MUTED }[status.tone]
-      const scene = desktop
-        ? Svg({ source: gameSvg(g, Math.min(760, cols * 8 - 24), nowMs), alt: 'Pet Runner, score ' + g.score, width: Math.min(760, cols * 8 - 24), height: Math.round((Math.min(760, cols * 8 - 24) * 80) / 320) })
-        : Image({ key: 'game', source: { rgba: toBase64(gameRgba(g, Math.min(cols - 2, 80), 8, nowMs)), width: Math.min(cols - 2, 80) * 4, height: 64 }, columns: Math.min(cols - 2, 80), rows: 8, alt: 'Pet Runner, score ' + g.score })
-      return Box({
-        flexDirection: 'column',
-        children: [
-          scene,
-          Box({
-            flexDirection: 'row',
-            columnGap: 2,
-            children: [
-              Text({ color: tone, children: [status.text] }),
-              Box({ flexGrow: 1, children: [] }),
-              Text({ color: TEXT, children: [String(g.score).padStart(5, '0')] }),
-              Text({ color: DIM, children: ['best ' + String(g.best).padStart(5, '0')] }),
-            ],
-          }),
-          Box({
-            flexDirection: 'row',
-            columnGap: 2,
-            children: [
-              Button({ key: 'game-jump', label: 'Jump', hotkey: 'j', plain: true, autoFocus: true, onPress: () => {
-                if (game) jumpGame(game)
-                $.ui.invalidate('ui.render')
-              } }),
-              Button({ key: 'game-pause', label: 'Pause', hotkey: 'p', plain: true, onPress: () => {
-                if (game && game.mode === 'run') game.paused = !game.paused
-                $.ui.invalidate('ui.render')
-              } }),
-              Text({ color: DIM, children: ['Esc back to Claude'] }),
-            ],
-          }),
-        ],
-      })
-    }
     if (e.requestId !== 'deck-style') return next(e)
     const { Box, Text, Button, Svg } = $.ui.resolve(e)
     const desktop = e.surface === 'desktop'
@@ -1596,7 +1507,7 @@ export function register(on) {
     if (prefs.show.pet) {
       if (desktop && Svg) {
         const W = Math.max(320, cols * 8)
-        lane.push(Svg({ source: petLaneSvg(pet, nowMs, W, 62), alt: 'Claude pet, ' + pet.act, width: W, height: 62 }))
+        lane.push(Svg({ source: petLaneSvg(pet, nowMs, W, 54), alt: 'Claude pet, ' + pet.act, width: W, height: 54 }))
       } else if (!desktop && Image) {
         // leave a margin: a row as wide as the band gets cut and marked with [-]
         const room = Math.max(0, cols - PET_COLS - 4)
@@ -1641,9 +1552,10 @@ export function register(on) {
         items.push(
           Box({
             flexDirection: 'row',
+            flexShrink: 0,
             columnGap: 1,
             alignItems: 'center',
-            children: [ring, Text({ color: TEXT, bold: true, children: [Math.round(row.pct) + '%'] }), Text({ color: MUTED, children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
+            children: [ring, Text({ color: TEXT, bold: true, wrap: 'truncate', children: [Math.round(row.pct) + '%'] }), Text({ color: MUTED, wrap: 'truncate', children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
           }),
         )
       }
@@ -1651,23 +1563,29 @@ export function register(on) {
         items.push(
           Box({
             flexDirection: 'row',
+            flexShrink: 0,
             columnGap: 1,
             alignItems: 'center',
             children: [
               desktop ? Svg({ alt: 'spend', width: 22, height: 22, source: ringSvg(100, STYLE.done.desk, 'usd') }) : Text({ color: STYLE.done.fill, children: ['$'] }),
-              Text({ color: STYLE.done.fill, bold: true, children: [fmtUsd(spend.dayUsd)] }),
-              Text({ color: MUTED, children: ['today · ' + fmtUsd(spend.monthUsd) + ' mo'] }),
+              Text({ color: STYLE.done.fill, bold: true, wrap: 'truncate', children: [fmtUsd(spend.dayUsd)] }),
+              Text({ color: MUTED, wrap: 'truncate', children: ['today · ' + fmtUsd(spend.monthUsd) + ' this month'] }),
             ],
           }),
         )
       }
       const busy = rows.find((r) => (r.kind === 'bar' || r.kind === 'activity') && r.animating && r.state !== 'needs_input')
-      if (busy) items.push(Text({ color: MUTED, children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] }))
+      if (busy) items.push(Box({ flexShrink: 1, children: [Text({ color: MUTED, wrap: 'truncate', children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] })] }))
       const line = Box({
         flexDirection: 'row',
-        columnGap: desktop ? 4 : 3,
+        columnGap: 2,
         alignItems: 'center',
-        children: [...(rows.length ? [toggle] : []), ...items, spacer, extrasText],
+        children: [
+          ...(rows.length ? [toggle] : []),
+          Box({ flexDirection: 'row', flexShrink: 1, overflow: 'hidden', columnGap: desktop ? 4 : 3, alignItems: 'center', children: items }),
+          spacer,
+          extrasText,
+        ],
       })
       return Box({ flexDirection: 'column', children: [...lane, line] })
     }
@@ -1698,11 +1616,12 @@ export function register(on) {
     // ----- collapsed, chips: one line of chips, limits first -----
     if (!prefs.open || !rows.length) {
       const chips = []
-      let budget = cols - 10 - extras.join('  ·  ').length
+      // the terminal counts columns; the desktop counts pixels (about 8 per column, ~7.5 per character)
+      let budget = desktop ? cols * 8 - 140 - extras.join('  ·  ').length * 7.5 : cols - 10 - extras.join('  ·  ').length
       let hidden = 0
       for (const row of collapsedOrder(rows)) {
         const st = STYLE[row.style]
-        const w = row.short.length + 10
+        const w = desktop ? row.short.length * 8.5 + 76 : row.short.length + 10
         if (w > budget) {
           hidden++
           continue
