@@ -7,7 +7,7 @@
 - Bar titles show the words you typed, without system reminders or pasted blocks.
 - The model route row no longer draws the confidence over the history squares.
 - Agent names no longer run into their status in the strips.
-- The terminal pet stays inside the band (no more `[-]` cut-off mark).
+- The terminal pet keeps a small margin from the band's right edge.
 - The pet's lane is taller, so jumps aren't clipped.
 - `/deck`, `/deck expand` and `/deck collapse` always reply.
 - Tests run on every push (GitHub Actions).
