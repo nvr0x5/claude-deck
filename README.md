@@ -27,7 +27,11 @@
 **Deck** is a Claude Code mod. It draws a small, collapsible panel in the band above your prompt, in the terminal and in the Desktop app, and keeps it live while Claude works. It only watches and draws: it never blocks a tool call, changes a request, or adds tokens to your conversation.
 
 <p align="center">
-  <img src="assets/demo.svg" alt="An illustrative session. Claude fixes an auth bug: the Deck bar fills stage by stage with two agents as strips under it, turns amber when a command needs approval, then goes green while the pet celebrates. Usage limits and countdowns sit below." width="860">
+  <img src="assets/demo-desktop.svg" alt="An illustrative session in the Claude Code desktop app. Deck shows the model route, a plan bar that fills stage by stage with two agents as strips under it, turns amber when a command needs approval and green when done, while the pet plays, alerts, reads and celebrates. Context and the 5h and 7d limits with countdowns sit below. At the end Deck collapses to one status line." width="860">
+</p>
+
+<p align="center">
+  <img src="assets/demo-terminal.svg" alt="The same session in the terminal (Ghostty): solid bars for the route, the plan with agent rows, context and the 5h and 7d limits, the pet above, and the one-line collapsed view at the end." width="860">
 </p>
 
 ## Install
@@ -57,7 +61,7 @@ Mods need Claude Code 2.1.286 or later. To try it from a clone without installin
 
 When something needs you (a permission prompt, a question, a reply ending in `?`), its row turns amber, a collapsed Deck opens by itself, and a soft alert plays. Steps tick, finished bars chime, and the last one plays a little fanfare.
 
-**Collapsed**, Deck is one line ordered by what matters: anything waiting on you, then your **5h and 7d limits**, context, the current task, and the route.
+**Collapsed**, Deck is one line ordered by what matters: anything waiting on you, then your **5h and 7d limits**, context, the current task, and the route. Pick its look with `/deck collapsed chips` (chips with mini bars) or `/deck collapsed text` (one plain status line, with the clock and weather at its end).
 
 **Styles.** Pick how the bars look with `/deck style`, a picker with live previews. Each app keeps its own choice.
 
@@ -84,6 +88,7 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel` |
 | `/deck <section> on\|off` | `plans agents context limits route pet clock weather all` |
 | `/deck city <name>` | Weather city |
+| `/deck collapsed chips\|text` | Collapsed look: chips with mini bars, or one plain status line |
 | `/deck auto on\|off` | Open by itself when something needs you |
 | `/deck sound on\|off` | Sounds |
 | `/deck quiet on\|off` | Hide the router's own lines while Deck shows the route |

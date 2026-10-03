@@ -345,3 +345,17 @@ test('bar titles use the typed words, not system reminders around them', async (
   const out = await $.command.run({ command: 'deck', args: 'status' })
   expect(out.text).toMatch(/● Use 2 subagents to list files — /)
 })
+
+test('/deck collapsed text draws one plain status line with limits first', async ($, on) => {
+  const { saved } = stubs(on)
+  await start($)
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'collapsed text' })
+  expect((saved.get('prefs') as any).collapsed).toBe('text')
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    expect(await ui.find({ type: 'Text', text: /^5h 31% ↻/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^Fixing auth 3\/5/ })).toBeDefined()
+    await ui.unmount()
+  }
+})

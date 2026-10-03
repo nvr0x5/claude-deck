@@ -19,6 +19,7 @@ const DEFAULT_PREFS = {
   auto: true,
   sound: true,
   quiet: true,
+  collapsed: 'chips', // 'chips' (mini bars) or 'text' (one plain status line)
   city: null, // { name, lat, lon }
 }
 
@@ -829,6 +830,7 @@ const HELP = [
   '/deck <section> on|off     sections: ' + SECTIONS.join(', ') + ', all',
   '/deck city <name>          set the weather city (turns weather on)',
   "/deck quiet on|off         hide the router's own status and log lines while the HUD shows the route",
+  '/deck collapsed chips|text how the collapsed line looks: chips with mini bars, or one plain status line',
   '/deck auto on|off          expand when something needs you',
   '/deck sound on|off',
   '/deck demo                 play a sample plan with agents',
@@ -974,6 +976,11 @@ export function register(on) {
       reply = 'Sample plan running above the prompt.'
     } else if (a === 'auto' && (b === 'on' || b === 'off')) prefs.auto = b === 'on'
     else if (a === 'quiet' && (b === 'on' || b === 'off')) prefs.quiet = b === 'on'
+    else if (a === 'collapsed' && (b === 'chips' || b === 'text')) {
+      prefs.collapsed = b
+      prefs.open = false
+      reply = b === 'text' ? 'Collapsed Deck is now one plain status line.' : 'Collapsed Deck now shows chips with mini bars.'
+    }
     else if (a === 'sound' && (b === 'on' || b === 'off')) {
       prefs.sound = b === 'on'
       if (prefs.sound) play($, 'chime')
@@ -1354,7 +1361,30 @@ export function register(on) {
     const extrasText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [extras.join('  ·  ')] })] })
     const spacer = Box({ flexGrow: 1, children: [] })
 
-    // ----- collapsed: one line of chips, limits first -----
+    // ----- collapsed, text: one plain status line, clock and weather at its end -----
+    if ((!prefs.open || !rows.length) && prefs.collapsed === 'text') {
+      const parts = []
+      for (const row of collapsedOrder(rows)) {
+        const st = STYLE[row.style]
+        if (parts.length) parts.push(Text({ children: ['  '] }))
+        if (row.kind === 'route') {
+          parts.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: ['⇄ '] }))
+          parts.push(Text({ color: MUTED, children: [row.to + (row.effort ? ' · ' + row.effort : '')] }))
+          continue
+        }
+        parts.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
+        parts.push(Text({ color: row.state === 'needs_input' ? st.fill : MUTED, children: [row.short] }))
+      }
+      if (extras.length) parts.push(Text({ color: MUTED, children: [(parts.length ? '  ' : '') + [...extras].reverse().join('  ')] }))
+      const line = Box({
+        flexDirection: 'row',
+        columnGap: 1,
+        children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', flexShrink: 1, children: [Text({ wrap: 'truncate', children: parts })] })],
+      })
+      return Box({ flexDirection: 'column', children: [...lane, line] })
+    }
+
+    // ----- collapsed, chips: one line of chips, limits first -----
     if (!prefs.open || !rows.length) {
       const chips = []
       let budget = cols - 10 - extras.join('  ·  ').length

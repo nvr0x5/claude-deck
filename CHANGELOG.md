@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.2
+
+- New collapsed look: `/deck collapsed text` shows one plain status line (limits, context, task, route, weather, clock). `/deck collapsed chips` keeps the mini bars.
+- Two demos in the README, desktop and terminal, both drawn with Deck's own code and ending on the collapsed line.
+- The test workflow asks for read-only access; added SECURITY.md.
+
 ## 0.3.1
 
 - Agents started without a todo list now show as strips under the activity bar, with their model, like the demo.
