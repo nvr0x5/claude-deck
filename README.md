@@ -7,6 +7,7 @@
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-D97757?style=flat-square&labelColor=14121a"></a>
   <img alt="Claude Code 2.1.286+" src="https://img.shields.io/badge/Claude%20Code-2.1.286%2B-9C95EC?style=flat-square&labelColor=14121a">
   <img alt="CLI and Desktop" src="https://img.shields.io/badge/runs%20in-CLI%20%2B%20Desktop-EBA83A?style=flat-square&labelColor=14121a">
+  <a href="#model-routing"><img alt="Pairs with jev-model-router" src="https://img.shields.io/badge/pairs%20with-jev--model--router-5DCAA5?style=flat-square&labelColor=14121a"></a>
 </p>
 
 <p align="center">
@@ -26,6 +27,8 @@
 
 **Deck** is a Claude Code mod. It draws a small, collapsible panel in the band above your prompt, in the terminal and in the Desktop app, and keeps it live while Claude works. It only watches and draws: it never blocks a tool call, changes a request, or adds tokens to your conversation.
 
+It pairs with **[jev-model-router](#model-routing)**: when the router picks a model and effort for a prompt or a subagent, Deck shows the decision live, with its confidence, so routing stops being invisible.
+
 <p align="center">
   <img src="assets/demo-desktop.svg" alt="An illustrative session in the Claude Code desktop app. Deck shows the model route, a plan bar that fills stage by stage with two agents as strips under it, turns amber when a command needs approval and green when done, while the pet plays, alerts, reads and celebrates. Context and the 5h and 7d limits with countdowns sit below. At the end Deck collapses to one status line." width="860">
 </p>
@@ -43,7 +46,7 @@ In Claude Code:
 /plugin install deck@deck
 ```
 
-Then run `/deck demo` to see it.
+Then run `/deck demo` to see it. In a fresh session the demo fills in a sample model route and sample limits until the real ones arrive.
 
 Mods need Claude Code 2.1.286 or later. To try it from a clone without installing, run `claude --plugin-dir ./claude-deck`.
 
@@ -94,7 +97,7 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | Command | What it does |
 |---|---|
 | `/deck`, `0` in an empty prompt, or the **Deck** footer button | Collapse or expand |
-| `/deck style` | Style picker with live previews (keys 1–5) |
+| `/deck style` | Style picker with live previews (keys 1–6) |
 | `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel`, `spark` |
 | `/deck <section> on\|off` | `plans agents context limits route pet clock weather all` |
 | `/deck city <name>` | Weather city |
@@ -103,7 +106,7 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck auto on\|off` | Open by itself when something needs you |
 | `/deck sound on\|off` | Sounds |
 | `/deck quiet on\|off` | Hide the router's own lines while Deck shows the route |
-| `/deck demo` | A sample plan with two agents |
+| `/deck demo` | A sample plan with two agents (plus a sample route and limits until real ones arrive) |
 | `/deck clear` | Remove all bars |
 | `/deck status` | Everything Deck shows, as text |
 
@@ -111,15 +114,25 @@ Settings are saved and shared by every session on your machine.
 
 ## Model routing
 
-Deck shows routing; it doesn't route. Pair it with [jev-model-router](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) (MIT), which picks each subagent's model and each prompt's effort. Deck reads its decisions and draws them as the **Model route** row: your model → the routed one, the effort, the confidence, a risk flag, and the last eight decisions.
+Deck works on its own, and it's better with **[jev-model-router](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router)** by Daniel Ávila (MIT, part of claude-code-templates). The router uses Jev, TypeSafe's decision model, to pick each subagent's model and each prompt's reasoning effort. Deck shows what it decided.
 
-To add the router, install it from claude-code-templates in a project:
+| Where | What Deck shows |
+|---|---|
+| **Model route** row | Your model → the one the router picked (haiku, sonnet or opus), the effort, the confidence, a risk flag, how long the decision took, and the last eight decisions as colored squares |
+| **Agent strips** | The model each subagent was given, as a haiku, sonnet or opus tag |
+| **Collapsed line** | `⇄ opus · medium`, the current route at a glance |
+
+Deck only reads the router's output; routing is the router's job, and Deck never changes a request itself. Deck keeps the router's own status and log lines out of the transcript while it shows them as a row; `/deck quiet off` brings them back.
+
+**Add the router.** Install it in a project with claude-code-templates:
 
 ```bash
 npx claude-code-templates@latest --mod productivity/jev-model-router
 ```
 
-Or load it for every session by adding its folder to `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`. With no key it uses Claude Code's built-in classifier and nothing leaves your machine. For calibrated confidence, add a TypeSafe key in `~/.claude/settings.json`:
+Or clone claude-code-templates and add the router's folder to `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` to load it in every session.
+
+With no key, the router uses Claude Code's built-in classifier and nothing leaves your machine. For a calibrated confidence, add a TypeSafe key in `~/.claude/settings.json`. The entry's name depends on how the router is loaded: `jev-model-router@skills-dir` for the `npx` install, `jev-model-router@inline` for a folder in `CLAUDE_CODE_PLUGIN_DIRS`.
 
 ```json
 "pluginConfigs": {
@@ -127,7 +140,7 @@ Or load it for every session by adding its folder to `CLAUDE_CODE_PLUGIN_DIRS` i
 }
 ```
 
-With a key, prompt text goes to TypeSafe. Deck's `/deck quiet off` shows the router's own lines, including `ready on typesafe` when the key is picked up.
+With a key, prompt text goes to TypeSafe. Run `/deck quiet off` and look for `ready on typesafe` to confirm the key was picked up. See the [router's README](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) for its options, such as routing the main model too.
 
 ## Updating
 
@@ -145,12 +158,12 @@ cd claude-deck && claude plugin test
 node assets/make-banner.mjs && node assets/make-demo.mjs && node assets/make-styles.mjs && node assets/make-social.mjs
 ```
 
-The banner, the demo and the social card are generated from the mod's own drawing code, so they always match what Deck really draws.
+The banner, the demos, the styles gallery and the social card are generated from the mod's own drawing code, so they always match what Deck really draws.
 
 ## Credits
 
 - The desktop pixel bar, gliding pill, agent strips and plan parsing adapt [plan-progress](https://github.com/zycck/claude-mods) by Kirill Serditov (MIT, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
-- The model route row reads [jev-model-router](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) by Daniel Ávila (MIT).
+- The model route row and the agent model tags read [jev-model-router](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) by Daniel Ávila (MIT), built on TypeSafe's Jev.
 - The README layout takes its cue from [jev-pilot](https://github.com/Akramovic1/jev-pilot).
 
 Deck is an independent project, not made or endorsed by Anthropic.
