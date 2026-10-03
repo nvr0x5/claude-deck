@@ -17,6 +17,7 @@
 <p align="center">
   <a href="#install">Install</a> ·
   <a href="#what-you-get">What you get</a> ·
+  <a href="#styles">Styles</a> ·
   <a href="#the-pet">The pet</a> ·
   <a href="#commands">Commands</a> ·
   <a href="#model-routing">Model routing</a> ·
@@ -28,6 +29,12 @@
 **Deck** is a Claude Code mod. It draws a small, collapsible panel in the band above your prompt, in the terminal and in the Desktop app, and keeps it live while Claude works. It only watches and draws: it never blocks a tool call, changes a request, or adds tokens to your conversation.
 
 It pairs with **[jev-model-router](#model-routing)**: when the router picks a model and effort for a prompt or a subagent, Deck shows the decision live, with its confidence, so routing stops being invisible.
+
+- **Claude Code Desktop and CLI.** The same mod runs in the Desktop app's Code tab and in the terminal, each drawn natively: animated SVG on Desktop, colored text and pictures in the terminal.
+- **Your limits, always on screen.** 5h and 7d usage with live reset countdowns and burn rates, no `/usage` needed.
+- **Live progress.** Plan bars, an activity bar for any task, and subagent strips with the model each one got.
+- **Six bar styles, three collapsed looks.** Pixel, segments, line, solid, dots and spark; chips, text and rings. Pick yours with `/deck style`; see them all in [Styles](#styles).
+- **A tiny pet** that plays while Claude works and raises a **!** when Claude needs you.
 
 <p align="center">
   <img src="assets/demo-desktop.svg" alt="An illustrative session in the Claude Code desktop app. Deck shows the model route, a plan bar that fills stage by stage with two agents as strips under it, turns amber when a command needs approval and green when done, while the pet plays, alerts, reads and celebrates. Context and the 5h and 7d limits with countdowns sit below. At the end Deck collapses to one status line." width="860">
@@ -71,7 +78,9 @@ When something needs you (a permission prompt, a question, a reply ending in `?`
 - `/deck collapsed text`: one plain status line, with the clock and weather at its end
 - `/deck collapsed rings`: a ring per limit with its reset time, plus spend: `◔ 14% 5h · resets 1h7m   ◕ 83% 7d · resets 3h47m   $ $0.10 today · $4.30 mo`
 
-**Styles.** Pick how the bars look with `/deck style`, a picker with live previews. Each app keeps its own choice.
+## Styles
+
+Pick how the bars look with `/deck style`, a picker with live previews. Each app (Desktop and terminal) keeps its own choice.
 
 <p align="center">
   <img src="assets/styles.svg" alt="Every Deck bar style (pixel, segments, line, solid, dots, spark) on Desktop and in the terminal, and the three collapsed looks: chips, text and rings." width="860">
