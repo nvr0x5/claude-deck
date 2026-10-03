@@ -1,6 +1,6 @@
 {
   "name": "deck",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "A collapsible HUD above the prompt: plan bars and subagent strips, context, usage limits with reset countdowns, the model route a router picked, a pet Claude, clock and weather. Five bar styles. CLI and Desktop.",
   "author": {
     "name": "nvr0x5",

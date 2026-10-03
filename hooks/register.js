@@ -133,6 +133,36 @@ function activityRow(now) {
   }
 }
 
+// open and close unfold row by row instead of jumping
+let fold = null // { dir: 'open' | 'close', start, timer }
+const FOLD_STEP = 35
+const FOLD_FADE = 220
+
+const isOpening = () => (fold ? fold.dir === 'open' : prefs.open)
+
+// how far the fold has run: wall time, or the timer's own ticks if those ran further
+const foldAge = (now) => (fold ? Math.max(now - fold.start, fold.ticks * 33) : 0)
+
+function foldCount(n, now) {
+  if (!fold) return n
+  const k = Math.floor(foldAge(now) / FOLD_STEP)
+  return fold.dir === 'open' ? Math.min(n, k + 1) : Math.max(0, n - k)
+}
+
+// a row that just unfolded fades and rises in; its age keeps a redraw from restarting it
+function withFadeIn(source, ageMs) {
+  if (ageMs >= FOLD_FADE) return source
+  const head = source.indexOf('>') + 1
+  const tail = source.lastIndexOf('</svg>')
+  return (
+    source.slice(0, head) +
+    `<style>@keyframes rin{from{opacity:0;transform:translateY(5px)}}.rin{animation:rin ${FOLD_FADE}ms cubic-bezier(.22,1,.36,1) both;animation-delay:-${Math.max(0, Math.round(ageMs))}ms}@media (prefers-reduced-motion:reduce){.rin{animation:none}}</style><g class="rin">` +
+    source.slice(head, tail) +
+    '</g>' +
+    source.slice(tail)
+  )
+}
+
 // the pet and what it reacts to
 const pet = createPet(Date.now())
 let turnActive = false
@@ -713,6 +743,28 @@ function play($, name) {
   $.audio.play({ asset: 'sounds/' + name + '.wav' }, { gain: 0.6 }).catch(() => {})
 }
 
+function setOpen($, want) {
+  if (want === isOpening()) return
+  if (fold && fold.timer) fold.timer.cancel()
+  const now = Date.now()
+  if (want) prefs.open = true
+  fold = { dir: want ? 'open' : 'close', start: now, ticks: 0, timer: null }
+  $.store.set('prefs', { ...prefs, open: want }).catch(() => {})
+  fold.timer = $.clock.every(33, () => {
+    if (!fold) return
+    fold.ticks++
+    const n = collectRows(Date.now()).length
+    const span = (n + 1) * FOLD_STEP + (fold.dir === 'open' ? FOLD_FADE : 0)
+    if (foldAge(Date.now()) >= span) {
+      fold.timer.cancel()
+      if (fold.dir === 'close') prefs.open = false
+      fold = null
+    }
+    $.ui.invalidate('ui.render')
+  })
+  $.ui.invalidate('ui.render')
+}
+
 async function savePrefs($) {
   await $.store.set('prefs', prefs)
 }
@@ -796,10 +848,7 @@ function react($, rows, now) {
     }
     lastSeen.set(row.id, { state: row.state, stage: row.stage })
   }
-  if (anyAsk && !prefs.open && prefs.auto) {
-    prefs.open = true
-    savePrefs($).catch(() => {})
-  }
+  if (anyAsk && !isOpening() && prefs.auto) setOpen($, true)
 }
 
 function statusText() {
@@ -906,16 +955,10 @@ export function register(on) {
     const [a, b, ...rest] = String(e.args ?? '').trim().split(/\s+/).filter(Boolean)
     let reply = null
 
-    if (!a) {
-      prefs.open = !prefs.open
-      reply = prefs.open ? 'Deck expanded.' : 'Deck collapsed.'
-    }
-    else if (a === 'expand') {
-      prefs.open = true
-      reply = 'Deck expanded.'
-    } else if (a === 'collapse') {
-      prefs.open = false
-      reply = 'Deck collapsed.'
+    if (!a || a === 'expand' || a === 'collapse') {
+      const want = a === 'expand' ? true : a === 'collapse' ? false : !isOpening()
+      setOpen($, want)
+      return { text: want ? 'Deck expanded.' : 'Deck collapsed.' }
     }
     else if (a === 'help') reply = HELP
     else if (a === 'status') reply = statusText()
@@ -1236,12 +1279,8 @@ export function register(on) {
         Button({
           key: 'deck-footer',
           label: n ? 'Deck ' + n : 'Deck',
-          dimColor: !prefs.open,
-          onPress: async () => {
-            prefs.open = !prefs.open
-            $.ui.invalidate('ui.render')
-            await $.store.set('prefs', prefs)
-          },
+          dimColor: !isOpening(),
+          onPress: () => setOpen($, !isOpening()),
         }),
         below,
       ],
@@ -1348,15 +1387,11 @@ export function register(on) {
 
     const toggle = Button({
       key: 'deck-toggle',
-      label: prefs.open ? 'deck ▾' : 'deck ▸',
+      label: isOpening() ? 'deck ▾' : 'deck ▸',
       plain: true,
       hotkey: '0',
       dimColor: true,
-      onPress: async () => {
-        prefs.open = !prefs.open
-        $.ui.invalidate('ui.render')
-        await $.store.set('prefs', prefs)
-      },
+      onPress: () => setOpen($, !isOpening()),
     })
     const extrasText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [extras.join('  ·  ')] })] })
     const spacer = Box({ flexGrow: 1, children: [] })
@@ -1463,9 +1498,11 @@ export function register(on) {
       const total = Math.max(320, cols * 8)
       const titleW = Math.min(Math.round(total * 0.28), Math.max(...rows.map((r) => Math.round(textWidth(r.title, 6.4)))))
       const trackW = Math.max(120, Math.min(1400, total - titleW - RIGHT_W - 70))
-      const lines = rows.map((row) => {
+      const shown = rows.slice(0, foldCount(rows.length, nowMs))
+      const lines = shown.map((row, i) => {
         const st = STYLE[row.style]
         const svg = rowSvg(row, trackW, nowMs)
+        if (fold && fold.dir === 'open') svg.source = withFadeIn(svg.source, foldAge(nowMs) - i * FOLD_STEP)
         const alt =
           row.kind === 'route'
             ? 'Model route: ' + row.from + ' to ' + row.to + (row.effort ? ', effort ' + row.effort : '')
@@ -1493,7 +1530,7 @@ export function register(on) {
     const rightW = 12
     const barW = Math.max(16, cols - labelW - rightW - 8)
     const lines = []
-    for (const row of rows) {
+    for (const row of rows.slice(0, foldCount(rows.length, nowMs))) {
       if (lines.length >= maxRows) break
       const st = STYLE[row.style]
       if (row.kind === 'route') {

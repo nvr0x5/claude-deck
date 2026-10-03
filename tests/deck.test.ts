@@ -359,3 +359,33 @@ test('/deck collapsed text draws one plain status line with limits first', async
     await ui.unmount()
   }
 })
+
+test('expanding unfolds the rows one after another, and the toggle folds them away', async ($, on) => {
+  const { clock } = stubs(on)
+  await start($)
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  let ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Weekly · 7d/ })).toBeUndefined()
+  await ui.unmount()
+  await clock.advance(1000)
+  ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Weekly · 7d/ })).toBeDefined()
+  await ui.press({ key: 'deck-toggle' })
+  await ui.unmount()
+  await clock.advance(1000)
+  ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Session · 5h/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^5h 31% ↻/ })).toBeDefined()
+})
+
+test('desktop rows fade in while they unfold', async ($, on) => {
+  const { clock } = stubs(on)
+  await start($)
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  await clock.advance(40)
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const row = await ui.find({ key: 'row-bar:todo' })
+  expect(JSON.stringify(row)).toMatch(/@keyframes rin/)
+})
