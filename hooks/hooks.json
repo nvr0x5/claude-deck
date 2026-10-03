@@ -1,0 +1,4 @@
+{
+  "description": "deck hooks module",
+  "modules": ["./register.js"]
+}

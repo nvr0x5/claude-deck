@@ -1,0 +1,12 @@
+{
+  "name": "deck",
+  "owner": { "name": "nvr0x5", "url": "https://github.com/nvr0x5" },
+  "metadata": { "description": "Deck: a cockpit for Claude Code" },
+  "plugins": [
+    {
+      "name": "deck",
+      "source": "./",
+      "description": "Plan bars, subagent strips, usage limits with reset countdowns, model routing and a tiny pet, above your prompt. CLI and Desktop."
+    }
+  ]
+}
