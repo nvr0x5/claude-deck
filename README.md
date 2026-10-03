@@ -113,7 +113,7 @@ The banner, the demo and the social card are generated from the mod's own drawin
 
 ## Credits
 
-- The desktop pixel bar, gliding pill, agent strips and plan parsing adapt [plan-progress](https://github.com/zycck/claude-mods) by Kirill Serditov (MIT).
+- The desktop pixel bar, gliding pill, agent strips and plan parsing adapt [plan-progress](https://github.com/zycck/claude-mods) by Kirill Serditov (MIT, see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
 - The model route row reads [jev-model-router](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) by Daniel Ávila (MIT).
 - The README layout takes its cue from [jev-pilot](https://github.com/Akramovic1/jev-pilot).
 

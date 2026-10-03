@@ -1,6 +1,11 @@
+# Third-party notices
+Portions of hooks/styles-desktop.js and hooks/register.js (the desktop track: pixel fill, stage and step
+marks, gliding pill, agent strips, plan-markdown parsing and short-update ops)
+are adapted from plan-progress in https://github.com/zycck/claude-mods:
+
 MIT License
 
-Copyright (c) 2026 nvr0x5
+Copyright (c) 2026 Kirill Serditov
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
