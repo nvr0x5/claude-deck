@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <img alt="tests" src="https://img.shields.io/badge/tests-17%20passing-5DCAA5?style=flat-square&labelColor=14121a">
+  <a href="https://github.com/nvr0x5/claude-deck/actions/workflows/test.yml"><img alt="tests" src="https://img.shields.io/github/actions/workflow/status/nvr0x5/claude-deck/test.yml?branch=main&style=flat-square&label=tests&labelColor=14121a"></a>
   <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-D97757?style=flat-square&labelColor=14121a"></a>
   <img alt="Claude Code 2.1.286+" src="https://img.shields.io/badge/Claude%20Code-2.1.286%2B-9C95EC?style=flat-square&labelColor=14121a">
   <img alt="CLI and Desktop" src="https://img.shields.io/badge/runs%20in-CLI%20%2B%20Desktop-EBA83A?style=flat-square&labelColor=14121a">
@@ -96,6 +96,26 @@ Settings are saved and shared by every session on your machine.
 ## Model routing
 
 Deck shows routing; it doesn't route. Pair it with [jev-model-router](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) (MIT), which picks each subagent's model and each prompt's effort. Deck reads its decisions and draws them as the **Model route** row: your model → the routed one, the effort, the confidence, a risk flag, and the last eight decisions.
+
+To add the router, install it from claude-code-templates in a project:
+
+```bash
+npx claude-code-templates@latest --mod productivity/jev-model-router
+```
+
+Or load it for every session by adding its folder to `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json`. With no key it uses Claude Code's built-in classifier and nothing leaves your machine. For calibrated confidence, add a TypeSafe key in `~/.claude/settings.json`:
+
+```json
+"pluginConfigs": {
+  "jev-model-router@inline": { "options": { "provider": "typesafe", "typesafeApiKey": "YOUR_KEY" } }
+}
+```
+
+With a key, prompt text goes to TypeSafe. Deck's `/deck quiet off` shows the router's own lines, including `ready on typesafe` when the key is picked up.
+
+## Updating
+
+`/plugin` → **Installed** → **Deck** → update. See [CHANGELOG.md](CHANGELOG.md) for what changed.
 
 ## Privacy
 

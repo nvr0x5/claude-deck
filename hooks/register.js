@@ -1321,14 +1321,17 @@ export function register(on) {
         const W = Math.max(320, cols * 8)
         lane.push(Svg({ source: petLaneSvg(pet, nowMs, W, 62), alt: 'Claude pet, ' + pet.act, width: W, height: 62 }))
       } else if (!desktop && Image) {
-        const room = Math.max(0, cols - PET_COLS - 1)
+        // leave a margin: a row as wide as the band gets cut and marked with [-]
+        const room = Math.max(0, cols - PET_COLS - 4)
         const x = Math.round(petX(pet, nowMs) * room)
         const px = petFrame(pet.act, nowMs - pet.start, pet.dir)
         lane.push(
           Box({
             flexDirection: 'row',
+            height: PET_ROWS,
+            overflow: 'hidden',
             children: [
-              Text({ children: [' '.repeat(x)] }),
+              Box({ width: x, flexShrink: 0, children: [] }),
               Image({ key: 'pet', source: { rgba: toBase64(px), width: PET_RASTER.width, height: PET_RASTER.height }, columns: PET_COLS, rows: PET_ROWS, alt: ' ' }),
             ],
           }),
