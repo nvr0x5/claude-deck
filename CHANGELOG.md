@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.5
+
+- Compact Desktop rows get 3px of space above and below, so the pills of neighboring rows no longer touch.
+
 ## 0.4.4
 
 - Long prompts no longer squeeze the bars: the title column on Desktop is capped and long titles end in "…".

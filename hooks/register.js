@@ -884,7 +884,9 @@ function ringSvg(pct, color, icon) {
 
 function rowSvg(row, W, nowMs) {
   const stripsH = row.strips ? 5 + stripsHeight(row.strips) : 0
-  const H = TRACK_H + stripsH
+  // compact rows sit with no gap between them; a little air above and below keeps the pills apart
+  const pad = prefs.size === 'roomy' ? 0 : 3
+  const H = TRACK_H + stripsH + pad * 2
   const total = W + RIGHT_W
   const track = row.kind === 'route' ? routeSvg(row, W) : desktopTrack(prefs.style.desktop, row, W, nowMs, lastHead)
   const rightColor = row.kind === 'route' ? (row.noAnswer ? STYLE.warn.desk : row.dir === '↓' ? STYLE.ok.desk : row.dir === '↑' ? STYLE.warn.desk : '#9a9893') : '#9a9893'
@@ -892,7 +894,7 @@ function rowSvg(row, W, nowMs) {
     height: H,
     width: total,
     source:
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${H}" viewBox="0 0 ${total} ${H}">` +
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${total}" height="${H}" viewBox="0 ${-pad} ${total} ${H}">` +
       track +
       `<text x="${total - 4}" y="${TRACK_H / 2 + 4.2}" text-anchor="end" style="font:400 12px 'Anthropic Sans',ui-sans-serif,system-ui,sans-serif;fill:${rightColor};font-variant-numeric:tabular-nums">${esc(row.right)}</text>` +
       (row.strips ? `<g transform="translate(0 ${TRACK_H + 5})">${stripsSvg(row.strips, W, nowMs, stripTool, (m) => tierColor(m), lastStrip)}</g>` : '') +
