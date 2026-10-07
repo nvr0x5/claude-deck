@@ -334,6 +334,32 @@ test('a turn without a todo list gets an activity bar that follows the tools', a
   expect(out.text).toMatch(/Fixing auth 3\/5/)
 })
 
+test('a plain chat turn shows while it thinks and goes away once answered', async ($, on) => {
+  stubs(on)
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  await start($)
+  await $.prompt.submit({ text: 'what does this do' })
+  await $.turn.start({ text: 'what does this do', turnId: 't1' })
+  let out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/what does this do — Thinking/)
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 5, isAborted: false, reason: 'answer', usage: null })
+  out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).not.toMatch(/what does this do/)
+})
+
+test('a long prompt as a bar title is cut short on Desktop', async ($, on) => {
+  stubs(on)
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  await start($)
+  await $.command.run({ command: 'deck', args: 'expand' })
+  const long = 'already updated, here is the screenshot of the whole thing'
+  await $.prompt.submit({ text: long })
+  await $.turn.start({ text: long, turnId: 't1' })
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await desk.find({ type: 'Text', text: /^already updated, here…$/ })).toBeDefined()
+  expect(await desk.find({ type: 'Text', text: long })).toBeUndefined()
+})
+
 test('agents started without a todo list show as strips under the activity bar, with their model', async ($, on) => {
   stubs(on)
   on('turn.start', ($, e) => ({ turnId: e.turnId }))

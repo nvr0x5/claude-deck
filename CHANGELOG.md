@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.4
+
+- Long prompts no longer squeeze the bars: the title column on Desktop is capped and long titles end in "…".
+- Compact Desktop: when expanded, the pet walks along the header line next to the row count instead of its own strip.
+- A plain chat turn (no tools, no agents) shows while Claude is thinking and disappears once it answers, instead of leaving "Done 0 tools".
+
 ## 0.4.3
 
 - The Model route row now says when the router has no answer (out of credit, bad key, timeout) instead of showing the last good route: `kept opus · ! typesafe 402`. After three failures in a row it adds a hint to check the router's key or credit. Failed turns show as hollow squares in the route history.

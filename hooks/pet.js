@@ -118,9 +118,9 @@ export function petSvgBody(state) {
 }
 
 // the lane: the pet walks from x0 to x1 by CSS, phased by the scene's age so a redraw does not restart it
-export function petLaneSvg(pet, now, W, H = 62) {
-  const PW = 48 * 1.05
-  const PH = 38 * 1.05
+export function petLaneSvg(pet, now, W, H = 62, scale = 1.05) {
+  const PW = 48 * scale
+  const PH = 38 * scale
   const room = Math.max(0, W - PW)
   const a = pet.x0 * room
   const b = pet.x1 * room
@@ -129,7 +129,7 @@ export function petLaneSvg(pet, now, W, H = 62) {
   const move = `@keyframes mv${pet.id}{from{transform:translateX(${a.toFixed(1)}px)}to{transform:translateX(${b.toFixed(1)}px)}}`
   const flip = pet.dir < 0 ? `translate(${PW} 0) scale(-1 1)` : ''
   let dots = ''
-  for (let x = 4; x < W; x += 12) dots += `<rect x="${x}" y="${H - 4}" width="4" height="1" fill="#fff" opacity=".07"/>`
+  if (scale >= 1) for (let x = 4; x < W; x += 12) dots += `<rect x="${x}" y="${H - 4}" width="4" height="1" fill="#fff" opacity=".07"/>`
   return (
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
     `<style>${PET_CSS}${move}.mv{animation:mv${pet.id} ${dur.toFixed(2)}s linear both;animation-delay:-${Math.min(age, dur).toFixed(2)}s}</style>` +

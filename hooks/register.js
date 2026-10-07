@@ -35,6 +35,8 @@ const MAX_STRIPS = 4
 const ASK_DELAY_MS = 600
 const TRACK_H = 22
 const RIGHT_W = 92
+const TITLE_MAX_CH = 22 // a long prompt as a bar title would squeeze every track
+const TITLE_MAX_PX = 160
 const PET_COLS = 12
 const PET_ROWS = 4
 const SLEEPY_MS = 180_000
@@ -108,6 +110,8 @@ function actionOf(e) {
 function activityRow(now) {
   if (!activity || !prefs.show.plans) return null
   if (activity.done && now - activity.doneAt > ACTIVITY_LINGER_MS) return null
+  // a plain chat turn: worth a row while it thinks, not once it has answered
+  if (activity.done && activity.tools === 0 && ![...agents.values()].some((a) => a.home === 'activity')) return null
   const planned = [...bars.values()].some((b) => b.id !== 'agents' && !b.dismissed && b.startedAt >= activity.start - 1000)
   if (planned) return null
   const asking = !activity.done && (waiting.has('main') || [...agents.values()].some((a) => a.home === 'activity' && a.state === 'waiting'))
@@ -1627,7 +1631,8 @@ export function register(on) {
 
     // the pet's lane
     const lane = []
-    if (prefs.show.pet) {
+    const inlinePet = desktop && Svg && prefs.show.pet && prefs.open && rows.length && prefs.size !== 'roomy'
+    if (prefs.show.pet && !inlinePet) {
       if (desktop && Svg) {
         const W = Math.max(320, cols * 8)
         const LH = prefs.size === 'roomy' ? 54 : 44
@@ -1807,15 +1812,21 @@ export function register(on) {
           $.ui.invalidate('ui.render')
         },
       })
+    // compact: the pet walks the header line, between the row count and the clock
+    const petW = Math.max(80, Math.round(Math.max(320, cols * 8) - 170 - extras.join('  ·  ').length * 7.5))
+    const headerMid = inlinePet
+      ? Box({ flexGrow: 1, overflow: 'hidden', children: [Svg({ source: petLaneSvg(pet, nowMs, petW, 28, 0.7), alt: 'Claude pet, ' + pet.act, width: petW, height: 28 })] })
+      : spacer
     const header = Box({
       flexDirection: 'row',
       columnGap: 1,
-      children: [toggle, Text({ color: DIM, children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), spacer, extrasText],
+      alignItems: 'center',
+      children: [toggle, Text({ color: DIM, children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, extrasText],
     })
 
     if (desktop) {
       const total = Math.max(320, cols * 8)
-      const titleW = Math.min(Math.round(total * 0.28), Math.max(...rows.map((r) => Math.round(textWidth(r.title, 6.4)))))
+      const titleW = Math.min(TITLE_MAX_PX, Math.round(total * 0.28), Math.max(...rows.map((r) => Math.round(textWidth(trunc(r.title, TITLE_MAX_CH), 6.4)))))
       const trackW = Math.max(120, Math.min(1400, total - titleW - RIGHT_W - 70))
       const shown = rows.slice(0, foldCount(rows.length, nowMs))
       const lines = shown.map((row, i) => {
@@ -1833,7 +1844,7 @@ export function register(on) {
           gap: 1,
           children: [
             Text({ color: st.desk, children: [row.kind === 'route' ? '⇄' : st.glyph] }),
-            Text({ wrap: 'truncate', children: [row.title] }),
+            Text({ wrap: 'truncate', children: [trunc(row.title, TITLE_MAX_CH)] }),
             Box({ flexGrow: 1, children: [] }),
             Svg({ source: svg.source, alt, width: svg.width, height: svg.height }),
             close(row),
