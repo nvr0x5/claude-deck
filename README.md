@@ -97,7 +97,7 @@ Pick how the bars look with `/deck style`, a picker with live previews. Each app
 
 ## The pet
 
-A tiny Claude lives above the panel. It wanders, runs, jumps and naps when you're idle, plays a console while Claude works, raises a **!** when something needs you, and celebrates when a bar finishes.
+A tiny Claude walks along Deck's header line (in its own strip above the panel with `/deck size roomy`, and always in the terminal). It wanders, runs, jumps and naps when you're idle, plays a console while Claude works, raises a **!** when something needs you, and celebrates when a bar finishes.
 
 On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it needs a terminal that shows images: Ghostty, Kitty, WezTerm or iTerm2. Elsewhere it simply stays hidden. `/deck pet off` sends it home.
 
@@ -151,6 +151,8 @@ With no key, the router uses Claude Code's built-in classifier and nothing leave
 ```
 
 With a key, prompt text goes to TypeSafe. Run `/deck quiet off` and look for `ready on typesafe` to confirm the key was picked up. See the [router's README](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) for its options, such as routing the main model too.
+
+If the router gets no answer (out of credit, a bad key, or slower than its 800 ms limit), it leaves the model as it is, and the route row says so in amber, e.g. `kept opus · ! typesafe 402`. After three misses in a row it adds a hint to check the key or credit.
 
 ## Updating
 
