@@ -140,7 +140,27 @@ Deck only reads the router's output; routing is the router's job, and Deck never
 npx claude-code-templates@latest --mod productivity/jev-model-router
 ```
 
-Or clone claude-code-templates and add the router's folder to `CLAUDE_CODE_PLUGIN_DIRS` in `~/.claude/settings.json` to load it in every session.
+Or load it in every session and keep it up to date on its own. Check out just the router's folder:
+
+```bash
+git clone --depth 1 --filter=blob:none --sparse https://github.com/davila7/claude-code-templates.git ~/mods/claude-code-templates
+git -C ~/mods/claude-code-templates sparse-checkout set cli-tool/components/mods/productivity/jev-model-router
+```
+
+Then, in `~/.claude/settings.json`, point `CLAUDE_CODE_PLUGIN_DIRS` at it and add a `SessionStart` hook that pulls updates in the background each time Claude Code starts (replace `/Users/you` with your home folder):
+
+```json
+"env": {
+  "CLAUDE_CODE_PLUGIN_DIRS": "/Users/you/mods/claude-code-templates/cli-tool/components/mods/productivity/jev-model-router"
+},
+"hooks": {
+  "SessionStart": [
+    { "hooks": [{ "type": "command", "command": "(git -C ~/mods/claude-code-templates pull -q --ff-only >/dev/null 2>&1 &) ; exit 0" }] }
+  ]
+}
+```
+
+An update pulled at startup takes effect from the next session. Auto-updating runs new upstream code without you reviewing it; leave the hook out and run the `git pull` yourself if you'd rather check first.
 
 With no key, the router uses Claude Code's built-in classifier and nothing leaves your machine. For a calibrated confidence, add a TypeSafe key in `~/.claude/settings.json`. The entry's name depends on how the router is loaded: `jev-model-router@skills-dir` for the `npx` install, `jev-model-router@inline` for a folder in `CLAUDE_CODE_PLUGIN_DIRS`.
 
