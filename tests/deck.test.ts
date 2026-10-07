@@ -176,6 +176,29 @@ test("the router's status and log become the route row", { plugins: [fakeRouter]
   expect((await desk.find({ key: 'row-route' }))).toBeDefined()
 })
 
+// a router whose backend refuses: the row says so instead of showing the last good route
+const brokeRouter = {
+  name: 'jev-model-router',
+  register(on) {
+    on('prompt.submit', async ($, e, next) => {
+      $.ui.log('[jev-model-router] typesafe responded 402')
+      $.ui.status('jev · no answer')
+      return next(e)
+    })
+  },
+}
+
+test('a router with no answer shows the reason, not a stale route', { plugins: [brokeRouter] }, async ($, on) => {
+  stubs(on)
+  await start($)
+  await $.command.run({ command: 'deck', args: 'expand' })
+  for (let i = 0; i < 3; i++) await $.prompt.submit({ text: 'hi' })
+  const out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/⇄ Model route — no answer \(typesafe 402\), kept opus · check router key or credit/)
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: /! typesafe 402/ })).toBeDefined()
+})
+
 test('the footer HUD button counts bars and toggles the HUD', async ($, on) => {
   const { saved } = stubs(on)
   await start($)

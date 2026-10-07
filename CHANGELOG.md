@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3
+
+- The Model route row now says when the router has no answer (out of credit, bad key, timeout) instead of showing the last good route: `kept opus · ! typesafe 402`. After three failures in a row it adds a hint to check the router's key or credit. Failed turns show as hollow squares in the route history.
+- Desktop is more compact by default: tighter rows and a shorter pet lane. `/deck size roomy` brings back the old spacing.
+
 ## 0.4.2
 
 - `/deck demo` now shows everything in a fresh session: a sample model route and sample 5h and 7d limits fill in until the real ones arrive, then real readings replace them.

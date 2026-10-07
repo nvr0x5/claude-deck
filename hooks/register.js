@@ -19,6 +19,7 @@ const DEFAULT_PREFS = {
   auto: true,
   sound: true,
   quiet: true,
+  size: 'compact', // 'compact' (tight rows, short pet lane) or 'roomy' (the 0.4 spacing)
   collapsed: 'chips', // 'chips' (mini bars), 'text' (one plain status line) or 'rings' (limit rings and cost)
   cost: false, // track spend today and this month (pay-per-use API keys)
   city: null, // { name, lat, lon }
@@ -67,6 +68,8 @@ const lastStrip = new Map()
 // model routing, as a router reports it, and what the turn actually ran with
 let route = null // { tier, conf, model, effort, unchanged, effortScore, risky, ms, at }
 const routeHist = []
+let routeFail = null // why the router's last classification failed: "typesafe 402", "timeout 800ms", "failed"
+let routeFails = 0 // failures in a row
 let sessionModel = ''
 let seen = { model: '', effort: '' }
 
@@ -497,6 +500,14 @@ function dropDemoRoute() {
 }
 
 function readRouteStatus(text) {
+  if (/^jev · no answer/.test(String(text))) {
+    dropDemoRoute()
+    const prev = route && !route.noAnswer ? route : route?.last
+    route = { noAnswer: true, reason: routeFail || 'no answer', fails: routeFails, last: prev ?? null, at: Date.now() }
+    routeHist.push('none')
+    if (routeHist.length > 8) routeHist.shift()
+    return true
+  }
   const m = String(text).match(/^jev · (\w+) ([\d.]+|n\/d)(?: → (\S+)| · unchanged)?/)
   if (!m) return false
   dropDemoRoute()
@@ -514,11 +525,23 @@ function readRouteStatus(text) {
 
 // "[jev-model-router] jev: tier fast (0.87) · effort 0.4 → low (0.71) · risky 0.02 · 249ms"
 function readRouteLog(text) {
+  const t = String(text)
+  const fail =
+    t.match(/\] (\w+) responded (\d+)/)?.slice(1).join(' ') ??
+    (t.match(/classification passed (\d+)ms/)?.[1] ? 'timeout ' + t.match(/classification passed (\d+)ms/)[1] + 'ms' : null) ??
+    (/classification failed|built-in classifier failed/.test(t) ? 'request failed' : null)
+  if (fail) {
+    routeFail = fail
+    routeFails++
+    return true
+  }
   const m = String(text).match(/jev: tier (\w+) \(([\d.]+|n\/d)\)(?: · effort ([\d.]+) → (\w+) \([^)]*\))?(?: · risky ([\d.]+|n\/d))?(?: · (\d+)ms)?/)
   if (!m) return false
   dropDemoRoute()
+  routeFail = null
+  routeFails = 0
   route = {
-    ...(route ?? {}),
+    ...(route && !route.noAnswer ? route : {}),
     tier: m[1],
     conf: m[2] === 'n/d' ? null : Number(m[2]),
     effortScore: m[3] ? Number(m[3]) : null,
@@ -530,8 +553,29 @@ function readRouteLog(text) {
 }
 
 function routeRow() {
-  if (!prefs.show.route || !route || !route.tier) return null
+  if (!prefs.show.route || !route) return null
   const from = shortModel(seen.model || sessionModel) || 'session'
+  if (route.noAnswer) {
+    return {
+      id: 'route',
+      kind: 'route',
+      style: 'warn',
+      title: 'Model route',
+      noAnswer: true,
+      reason: route.reason,
+      hint: route.fails >= 3 ? 'check router key or credit' : '',
+      from,
+      want: from,
+      to: from,
+      effort: seen.effort || '',
+      dir: '=',
+      right: '! no answer',
+      short: '⇄ ' + from + ' · no answer',
+      pct: 0,
+      marks: [],
+    }
+  }
+  if (!route.tier) return null
   const want = TIER_MODEL[route.tier] ?? route.tier
   const to = route.model || from
   const effort = route.effort || seen.effort || ''
@@ -714,6 +758,15 @@ function petMood(rows, now) {
 function routeCellsTerminal(row) {
   const cells = []
   const push = (s, color, bg, bold) => cells.push(...textCells(s, color, bg, bold))
+  if (row.noAnswer) {
+    push('kept ', DIM)
+    push(' ' + row.to + ' ', '#1e1e1e', tierColor(row.to, false), true)
+    push('  ! ' + row.reason, STYLE.warn.fill)
+    if (row.hint) push(' · ' + row.hint, DIM)
+    push('  ', MUTED)
+    for (const t of routeHist) push(t === 'none' ? '□' : '■', t === 'none' ? STYLE.warn.fill : tierColor(t, false))
+    return { cells, dirColor: STYLE.warn.fill }
+  }
   const dirColor = row.dir === '↓' ? STYLE.ok.fill : row.dir === '↑' ? STYLE.warn.fill : MUTED
   push(row.from + ' ', DIM)
   push(row.dir === '=' ? '= ' : '→ ', dirColor)
@@ -729,13 +782,37 @@ function routeCellsTerminal(row) {
   if (row.risky != null && row.risky > 0.7) push('  ⚠ risky', STYLE.hot.fill)
   if (row.ms != null) push('  ' + row.ms + 'ms', DIM)
   push('  ', MUTED)
-  for (const t of routeHist) push('■', tierColor(t, false))
+  for (const t of routeHist) push(t === 'none' ? '□' : '■', t === 'none' ? STYLE.warn.fill : tierColor(t, false))
   return { cells, dirColor }
 }
 
 function routeSvg(row, W) {
   const F = "'Anthropic Sans',ui-sans-serif,system-ui,sans-serif"
   let x = 0
+  if (row.noAnswer) {
+    let o = `<text x="0" y="15" style="font:400 12px ${F};fill:#77756f">kept</text>`
+    x = 34
+    const w = textWidth(row.to, 6.4) + 14
+    o += `<rect x="${x}" y="3" width="${w}" height="16" rx="4" fill="${tierColor(row.to)}"/><text x="${x + 7}" y="15" style="font:500 11.5px ${F};fill:#fff">${esc(row.to)}</text>`
+    x += w + 12
+    o += `<text x="${x}" y="15" style="font:500 12px ${F};fill:${STYLE.warn.desk}">! ${esc(row.reason)}</text>`
+    x += textWidth('! ' + row.reason, 6.6) + 10
+    if (row.hint) {
+      o += `<text x="${x}" y="15" style="font:400 11.5px ${F};fill:#9a9893">· ${esc(row.hint)}</text>`
+      x += textWidth('· ' + row.hint, 6.4) + 10
+    }
+    const histW = routeHist.length * 10
+    if (x + 12 + histW <= W) {
+      let hx = Math.max(x + 12, W - histW)
+      for (const t of routeHist) {
+        o += t === 'none'
+          ? `<rect x="${hx + 0.5}" y="8" width="6" height="6" rx="2" fill="none" stroke="${STYLE.warn.desk}"/>`
+          : `<rect x="${hx}" y="7.5" width="7" height="7" rx="2" fill="${tierColor(t)}" fill-opacity=".85"/>`
+        hx += 10
+      }
+    }
+    return o
+  }
   let out = `<text x="0" y="15" style="font:400 12px ${F};fill:#77756f">${esc(row.from)}</text>`
   x += textWidth(row.from, 6.4) + 6
   const dirColor = row.dir === '↓' ? STYLE.ok.desk : row.dir === '↑' ? STYLE.warn.desk : '#9a9893'
@@ -774,7 +851,9 @@ function routeSvg(row, W) {
   if (x + 12 + histW > W) return out
   let hx = Math.max(x + 12, W - histW)
   for (const t of routeHist) {
-    out += `<rect x="${hx}" y="7.5" width="7" height="7" rx="2" fill="${tierColor(t)}" fill-opacity=".85"/>`
+    out += t === 'none'
+      ? `<rect x="${hx + 0.5}" y="8" width="6" height="6" rx="2" fill="none" stroke="${STYLE.warn.desk}"/>`
+      : `<rect x="${hx}" y="7.5" width="7" height="7" rx="2" fill="${tierColor(t)}" fill-opacity=".85"/>`
     hx += 10
   }
   return out
@@ -804,7 +883,7 @@ function rowSvg(row, W, nowMs) {
   const H = TRACK_H + stripsH
   const total = W + RIGHT_W
   const track = row.kind === 'route' ? routeSvg(row, W) : desktopTrack(prefs.style.desktop, row, W, nowMs, lastHead)
-  const rightColor = row.kind === 'route' ? (row.dir === '↓' ? STYLE.ok.desk : row.dir === '↑' ? STYLE.warn.desk : '#9a9893') : '#9a9893'
+  const rightColor = row.kind === 'route' ? (row.noAnswer ? STYLE.warn.desk : row.dir === '↓' ? STYLE.ok.desk : row.dir === '↑' ? STYLE.warn.desk : '#9a9893') : '#9a9893'
   return {
     height: H,
     width: total,
@@ -1002,6 +1081,10 @@ function react($, rows, now) {
 function statusText() {
   const lines = []
   for (const r of collectRows(Date.now())) {
+    if (r.kind === 'route' && r.noAnswer) {
+      lines.push('⇄ Model route — no answer (' + r.reason + '), kept ' + r.to + (r.hint ? ' · ' + r.hint : ''))
+      continue
+    }
     if (r.kind === 'route') {
       lines.push('⇄ Model route — ' + r.from + ' ' + (r.dir === '=' ? '=' : '→') + ' ' + r.to + (r.effort ? ' · effort ' + r.effort : '') + ' · jev ' + r.tier + (r.conf != null ? ' ' + r.conf.toFixed(2) : '') + ' (' + r.right + ')')
       continue
@@ -1027,6 +1110,7 @@ const HELP = [
   '/deck <section> on|off     sections: ' + SECTIONS.join(', ') + ', all',
   '/deck city <name>          set the weather city (turns weather on)',
   "/deck quiet on|off         hide the router's own status and log lines while the HUD shows the route",
+  '/deck size compact|roomy   compact (default) packs the rows tighter on Desktop',
   '/deck collapsed chips|text|rings  collapsed look: chips with mini bars, one plain line, or limit rings',
   '/deck cost on|off         track spend today and this month (pay-per-use API keys)',
   '/deck auto on|off          expand when something needs you',
@@ -1190,7 +1274,10 @@ export function register(on) {
       reply = 'Sample plan running above the prompt' + (demoRoute || demoUsage ? ', with sample ' + [demoRoute && 'routing', demoUsage && 'limits'].filter(Boolean).join(' and ') + ' until real ones arrive.' : '.')
     } else if (a === 'auto' && (b === 'on' || b === 'off')) prefs.auto = b === 'on'
     else if (a === 'quiet' && (b === 'on' || b === 'off')) prefs.quiet = b === 'on'
-    else if (a === 'collapsed' && (b === 'chips' || b === 'text' || b === 'rings')) {
+    else if (a === 'size' && (b === 'compact' || b === 'roomy')) {
+      prefs.size = b
+      reply = b === 'compact' ? 'Deck is compact: tighter rows and a shorter pet lane.' : 'Deck is roomy: the original spacing.'
+    } else if (a === 'collapsed' && (b === 'chips' || b === 'text' || b === 'rings')) {
       prefs.collapsed = b
       prefs.open = false
       reply = { chips: 'Collapsed Deck now shows chips with mini bars.', text: 'Collapsed Deck is now one plain status line.', rings: 'Collapsed Deck now shows limit rings' + (prefs.cost ? ' and spend.' : '. Add spend with /deck cost on.') }[b]
@@ -1543,7 +1630,8 @@ export function register(on) {
     if (prefs.show.pet) {
       if (desktop && Svg) {
         const W = Math.max(320, cols * 8)
-        lane.push(Svg({ source: petLaneSvg(pet, nowMs, W, 54), alt: 'Claude pet, ' + pet.act, width: W, height: 54 }))
+        const LH = prefs.size === 'roomy' ? 54 : 44
+        lane.push(Svg({ source: petLaneSvg(pet, nowMs, W, LH), alt: 'Claude pet, ' + pet.act, width: W, height: LH }))
       } else if (!desktop && Image) {
         // leave a margin: a row as wide as the band gets cut and marked with [-]
         const room = Math.max(0, cols - PET_COLS - 4)
@@ -1752,7 +1840,7 @@ export function register(on) {
           ],
         })
       })
-      return Box({ flexDirection: 'column', gap: 1, children: [...lane, header, ...lines] })
+      return Box({ flexDirection: 'column', gap: prefs.size === 'roomy' ? 1 : 0, children: [...lane, header, ...lines] })
     }
 
     // terminal

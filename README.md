@@ -110,6 +110,7 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel`, `spark` |
 | `/deck <section> on\|off` | `plans agents context limits route pet clock weather all` |
 | `/deck city <name>` | Weather city |
+| `/deck size compact\|roomy` | Row spacing on Desktop (compact is the default) |
 | `/deck collapsed chips\|text\|rings` | Collapsed look: chips with mini bars, one plain line, or limit rings |
 | `/deck cost on\|off` | Track spend today and this month |
 | `/deck auto on\|off` | Open by itself when something needs you |
