@@ -174,7 +174,17 @@ With no key, the router uses Claude Code's built-in classifier and nothing leave
 }
 ```
 
-With a key, prompt text goes to TypeSafe. Run `/deck quiet off` and look for `ready on typesafe` to confirm the key was picked up. See the [router's README](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) for its options, such as routing the main model too.
+With a key, prompt text goes to TypeSafe. Run `/deck quiet off` and look for `ready on typesafe` to confirm the key was picked up.
+
+**Main-model routing:** by default the router only changes your subagents' models and your main chat's reasoning effort. To let it also switch your main conversation's model (cheaper for short chats, haiku for "what is X?"), add `"routeMainModel": true` to the router's options:
+
+```json
+"jev-model-router@inline": { "options": { "provider": "typesafe", "typesafeApiKey": "YOUR_KEY", "routeMainModel": true } }
+```
+
+This is off by default because switching models throws away the prompt cache, and re-caching long conversations can cost more than the cheaper model saves (especially with your 86% cache hit rate). Turn it on for short sessions or new conversations.
+
+See the [router's README](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) for other options.
 
 If the router gets no answer (out of credit, a bad key, or slower than its 800 ms limit), it leaves the model as it is, and the route row says so in amber, e.g. `kept opus · ! typesafe 402`. After three misses in a row it adds a hint to check the key or credit.
 
