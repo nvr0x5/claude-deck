@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.8
+
+- `/deck panel` opens Deck in a panel of its own, always expanded. The VS Code extension's chat panel draws mod panels but not the band above the prompt, so this is how to see Deck there. `/deck panel off` closes it.
+
 ## 0.4.7
 
 - Claude Code for VS Code gets the Desktop look (SVG bars and the animated pet) once the extension draws mod panels. As of extension 2.1.294 its chat panel runs `/deck` but draws no panel; its terminal mode shows the full Deck.

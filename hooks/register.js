@@ -1133,6 +1133,7 @@ const HELP = [
   '/deck <section> on|off     sections: ' + SECTIONS.join(', ') + ', all',
   '/deck city <name>          set the weather city (turns weather on)',
   "/deck quiet on|off         hide the router's own status and log lines while the HUD shows the route",
+  '/deck panel [off]          open Deck in a panel (for the VS Code extension, which has no band above the prompt)',
   '/deck size compact|roomy   compact (default) packs the rows tighter on Desktop',
   '/deck collapsed chips|text|rings  collapsed look: chips with mini bars, one plain line, or limit rings',
   '/deck cost on|off         track spend today and this month (pay-per-use API keys)',
@@ -1154,6 +1155,314 @@ function demoStages() {
 }
 
 // ---------- hooks ----------
+
+// the band above the prompt, and the same view in a pane (/deck panel)
+async function deckView($, e, next) {
+  // the same view draws in the band above the prompt and, opened by /deck panel, in a pane:
+  // VS Code's panel draws panes but not the band
+  const inPane = e.component === 'Pane'
+  if (inPane && e.requestId !== 'deck-panel') return next(e)
+  if (!inPane && e.props.hasSurvey) return next(e)
+  const open = inPane || prefs.open
+  const { Box, Text, Button, Svg, Image } = $.ui.resolve(e)
+  const desktop = e.surface !== 'terminal' // desktop, VS Code and mobile all draw Svg
+  if (e.surface === 'terminal') sawTerminal = true
+  const nowMs = Date.now()
+  const cols = Math.max(40, e.props.bodyColumns ?? e.viewport?.columns ?? 100)
+  const rows = collectRows(nowMs)
+  const extras = []
+  if (prefs.show.clock) extras.push((desktop ? '◷ ' : '') + clockText())
+  const wt = prefs.show.weather ? weatherText(desktop) : ''
+  if (wt) extras.push(wt)
+  if (!rows.length && !extras.length && !prefs.show.pet) return next(e)
+
+  // the pet's lane
+  const lane = []
+  const inlinePet = desktop && Svg && prefs.show.pet && open && rows.length && prefs.size !== 'roomy'
+  if (prefs.show.pet && !inlinePet) {
+    if (desktop && Svg) {
+      const W = Math.max(320, cols * 8)
+      const LH = prefs.size === 'roomy' ? 54 : 44
+      lane.push(Svg({ source: petLaneSvg(pet, nowMs, W, LH), alt: 'Claude pet, ' + pet.act, width: W, height: LH }))
+    } else if (!desktop && Image) {
+      // leave a margin: a row as wide as the band gets cut and marked with [-]
+      const room = Math.max(0, cols - PET_COLS - 4)
+      const x = Math.round(petX(pet, nowMs) * room)
+      const px = petFrame(pet.act, nowMs - pet.start, pet.dir)
+      lane.push(
+        Box({
+          flexDirection: 'row',
+          height: PET_ROWS,
+          overflow: 'hidden',
+          children: [
+            Box({ width: x, flexShrink: 0, children: [] }),
+            Image({ key: 'pet', source: { rgba: toBase64(px), width: PET_RASTER.width, height: PET_RASTER.height }, columns: PET_COLS, rows: PET_ROWS, alt: ' ' }),
+          ],
+        }),
+      )
+    }
+  }
+
+  const toggle = Button({
+    key: 'deck-toggle',
+    label: isOpening() ? 'deck ▾' : 'deck ▸',
+    plain: true,
+    hotkey: '0',
+    dimColor: true,
+    onPress: () => setOpen($, !isOpening()),
+  })
+  const extrasText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [extras.join('  ·  ')] })] })
+  const spacer = Box({ flexGrow: 1, children: [] })
+
+  // ----- collapsed, rings: a ring per limit, its reset, and spend -----
+  if ((!open || !rows.length) && prefs.collapsed === 'rings') {
+    const items = []
+    const ask = rows.find((r) => r.state === 'needs_input')
+    if (ask) items.push(Text({ color: STYLE.ask.fill, children: ['? ' + trunc(ask.title, 24) + ' needs you'] }))
+    for (const row of rows.filter((r) => r.limit)) {
+      const st = STYLE[row.style]
+      const tag = row.kindKey === 'five_hour' ? '5h' : row.kindKey === 'seven_day' ? '7d' : row.title
+      const ring = desktop
+        ? Svg({ alt: tag + ' ' + Math.round(row.pct) + '% used', width: 22, height: 22, source: ringSvg(row.pct, st.desk, row.kindKey === 'seven_day' ? 'week' : 'clock') })
+        : Text({ color: st.fill, children: ['○◔◑◕●'[Math.min(4, Math.round(row.pct / 25))]] })
+      items.push(
+        Box({
+          flexDirection: 'row',
+          flexShrink: 0,
+          columnGap: 1,
+          alignItems: 'center',
+          children: [ring, Text({ color: TEXT, bold: true, wrap: 'truncate', children: [Math.round(row.pct) + '%'] }), Text({ color: MUTED, wrap: 'truncate', children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
+        }),
+      )
+    }
+    if (prefs.cost) {
+      items.push(
+        Box({
+          flexDirection: 'row',
+          flexShrink: 0,
+          columnGap: 1,
+          alignItems: 'center',
+          children: [
+            desktop ? Svg({ alt: 'spend', width: 22, height: 22, source: ringSvg(100, STYLE.done.desk, 'usd') }) : Text({ color: STYLE.done.fill, children: ['$'] }),
+            Text({ color: STYLE.done.fill, bold: true, wrap: 'truncate', children: [fmtUsd(spend.dayUsd)] }),
+            Text({ color: MUTED, wrap: 'truncate', children: ['today · ' + fmtUsd(spend.monthUsd) + ' this month'] }),
+          ],
+        }),
+      )
+    }
+    const busy = rows.find((r) => (r.kind === 'bar' || r.kind === 'activity') && r.animating && r.state !== 'needs_input')
+    if (busy) items.push(Box({ flexShrink: 1, children: [Text({ color: MUTED, wrap: 'truncate', children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] })] }))
+    const line = Box({
+      flexDirection: 'row',
+      columnGap: 2,
+      alignItems: 'center',
+      children: [
+        ...(rows.length ? [toggle] : []),
+        Box({ flexDirection: 'row', flexShrink: 1, overflow: 'hidden', columnGap: desktop ? 4 : 3, alignItems: 'center', children: items }),
+        spacer,
+        extrasText,
+      ],
+    })
+    return Box({ flexDirection: 'column', children: [...lane, line] })
+  }
+
+  // ----- collapsed, text: one plain status line, clock and weather at its end -----
+  if ((!open || !rows.length) && prefs.collapsed === 'text') {
+    const parts = []
+    for (const row of collapsedOrder(rows)) {
+      const st = STYLE[row.style]
+      if (parts.length) parts.push(Text({ children: ['  '] }))
+      if (row.kind === 'route') {
+        parts.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: ['⇄ '] }))
+        parts.push(Text({ color: MUTED, children: [row.to + (row.effort ? ' · ' + row.effort : '')] }))
+        continue
+      }
+      parts.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
+      parts.push(Text({ color: row.state === 'needs_input' ? st.fill : MUTED, children: [row.short] }))
+    }
+    if (extras.length) parts.push(Text({ color: MUTED, children: [(parts.length ? '  ' : '') + [...extras].reverse().join('  ')] }))
+    const line = Box({
+      flexDirection: 'row',
+      columnGap: 1,
+      children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', flexShrink: 1, children: [Text({ wrap: 'truncate', children: parts })] })],
+    })
+    return Box({ flexDirection: 'column', children: [...lane, line] })
+  }
+
+  // ----- collapsed, chips: one line of chips, limits first -----
+  if (!open || !rows.length) {
+    const chips = []
+    // the terminal counts columns; the desktop counts pixels (about 8 per column, ~7.5 per character)
+    let budget = desktop ? cols * 8 - 140 - extras.join('  ·  ').length * 7.5 : cols - 10 - extras.join('  ·  ').length
+    let hidden = 0
+    for (const row of collapsedOrder(rows)) {
+      const st = STYLE[row.style]
+      const w = desktop ? row.short.length * 8.5 + 76 : row.short.length + 10
+      if (w > budget) {
+        hidden++
+        continue
+      }
+      budget -= w
+      if (chips.length) chips.push(Text({ color: TRACK, children: [' │ '] }))
+      if (row.kind === 'route') {
+        chips.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: [row.short + ' '] }))
+        continue
+      }
+      chips.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
+      const chipText = { color: row.state === 'needs_input' ? st.fill : row.limit ? TEXT : '#c9c7c1', children: [row.short + ' '] }
+      if (row.limit) chipText.bold = true
+      chips.push(Text(chipText))
+      chips.push(
+        desktop
+          ? Svg({
+              alt: row.title + ' ' + Math.round(row.pct) + '%',
+              width: 36,
+              height: 8,
+              source: `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="8"><rect width="36" height="8" rx="4" fill="#808080" fill-opacity=".2"/><rect width="${Math.max((36 * row.pct) / 100, row.pct > 0 ? 4 : 0)}" height="8" rx="4" fill="${st.desk}"/></svg>`,
+            })
+          : Box({ flexDirection: 'row', children: runs(Text, terminalMini(prefs.style.terminal, row, 5)) }),
+      )
+    }
+    if (hidden) chips.push(Text({ color: DIM, children: ['  +' + hidden] }))
+    const line = Box({
+      flexDirection: 'row',
+      columnGap: 1,
+      alignItems: 'center',
+      children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', alignItems: 'center', children: chips }), spacer, extrasText],
+    })
+    return Box({ flexDirection: 'column', children: [...lane, line] })
+  }
+
+  // ----- expanded -----
+  const close = (row) =>
+    Button({
+      key: 'x-' + row.id,
+      label: '✕',
+      plain: true,
+      dimColor: true,
+      onPress: async () => {
+        if (row.kind === 'activity') {
+          for (const ag of [...agents.values()]) if (ag.home === 'activity') agents.delete(ag.id)
+          activity = null
+        }
+        else if (row.kind === 'bar') {
+          const bar = row.bar
+          for (const ag of agentsOf(bar)) agents.delete(ag.id)
+          if (bar.id === 'todo' || bar.id === 'tasks') bar.dismissed = true
+          else bars.delete(bar.id)
+          if (bar.id === 'tasks') tasks.clear()
+          if (bar.id === 'demo' && demoTimer) demoTimer.cancel()
+        } else {
+          prefs.show[row.kind === 'route' ? 'route' : row.section] = false
+          await $.store.set('prefs', prefs)
+        }
+        $.ui.invalidate('ui.render')
+      },
+    })
+  // compact: the pet walks the header line, between the row count and the clock
+  const petW = Math.max(80, Math.round(Math.max(320, cols * 8) - 170 - extras.join('  ·  ').length * 7.5))
+  const headerMid = inlinePet
+    ? Box({ flexGrow: 1, overflow: 'hidden', children: [Svg({ source: petLaneSvg(pet, nowMs, petW, 28, 0.7), alt: 'Claude pet, ' + pet.act, width: petW, height: 28 })] })
+    : spacer
+  const header = Box({
+    flexDirection: 'row',
+    columnGap: 1,
+    alignItems: 'center',
+    children: [toggle, Text({ color: DIM, children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, extrasText],
+  })
+
+  if (desktop) {
+    const total = Math.max(320, cols * 8)
+    const titleW = Math.min(TITLE_MAX_PX, Math.round(total * 0.28), Math.max(...rows.map((r) => Math.round(textWidth(trunc(r.title, TITLE_MAX_CH), 6.4)))))
+    const trackW = Math.max(120, Math.min(1400, total - titleW - RIGHT_W - 70))
+    const shown = rows.slice(0, (inPane ? rows.length : foldCount(rows.length, nowMs)))
+    const lines = shown.map((row, i) => {
+      const st = STYLE[row.style]
+      const svg = rowSvg(row, trackW, nowMs)
+      if (!inPane && fold && fold.dir === 'open') svg.source = withFadeIn(svg.source, foldAge(nowMs) - i * FOLD_STEP)
+      const alt =
+        row.kind === 'route'
+          ? 'Model route: ' + row.from + ' to ' + row.to + (row.effort ? ', effort ' + row.effort : '')
+          : row.title + ': ' + row.name + (row.count ? ' ' + row.count : '') + ', ' + row.right + (row.strips ? '; agents: ' + row.strips.shown.map((ag) => ag.title + ' ' + ag.state).join(', ') : '')
+      return Box({
+        key: 'row-' + row.id,
+        flexDirection: 'row',
+        alignItems: row.strips ? 'flex-start' : 'center',
+        gap: 1,
+        children: [
+          Text({ color: st.desk, children: [row.kind === 'route' ? '⇄' : st.glyph] }),
+          Text({ wrap: 'truncate', children: [trunc(row.title, TITLE_MAX_CH)] }),
+          Box({ flexGrow: 1, children: [] }),
+          Svg({ source: svg.source, alt, width: svg.width, height: svg.height }),
+          close(row),
+        ],
+      })
+    })
+    return Box({ flexDirection: 'column', gap: prefs.size === 'roomy' ? 1 : 0, children: [...lane, header, ...lines] })
+  }
+
+  // terminal
+  const maxRows = Math.max(2, (e.props.maxRows ?? 14) - 1 - (lane.length ? PET_ROWS : 0))
+  const labelW = Math.min(24, Math.max(12, Math.floor(cols * 0.2)))
+  const rightW = 12
+  const barW = Math.max(16, cols - labelW - rightW - 8)
+  const lines = []
+  for (const row of rows.slice(0, (inPane ? rows.length : foldCount(rows.length, nowMs)))) {
+    if (lines.length >= maxRows) break
+    const st = STYLE[row.style]
+    if (row.kind === 'route') {
+      const { cells, dirColor } = routeCellsTerminal(row)
+      lines.push(
+        Box({
+          flexDirection: 'row',
+          columnGap: 1,
+          children: [
+            Text({ color: STYLE.run.fill, children: ['⇄'] }),
+            Box({ width: labelW, flexShrink: 0, children: [Text({ color: TEXT, children: [row.title] })] }),
+            Box({ flexGrow: 1, flexDirection: 'row', children: runs(Text, cells.slice(0, barW)) }),
+            Box({ width: rightW, flexShrink: 0, justifyContent: 'flex-end', children: [Text({ color: dirColor, children: [row.right] })] }),
+            close(row),
+          ],
+        }),
+      )
+      continue
+    }
+    lines.push(
+      Box({
+        flexDirection: 'row',
+        columnGap: 1,
+        children: [
+          Text({ color: st.fill, children: [st.glyph] }),
+          Box({ width: labelW, flexShrink: 0, children: [Text({ color: TEXT, wrap: 'truncate', children: [trunc(row.title, labelW)] })] }),
+          Box({ flexGrow: 1, flexDirection: 'row', children: runs(Text, terminalBar(prefs.style.terminal, row, barW, frame)) }),
+          Box({ width: rightW, flexShrink: 0, justifyContent: 'flex-end', children: [Text({ color: MUTED, children: [row.right] })] }),
+          close(row),
+        ],
+      }),
+    )
+    for (const ag of row.strips ? row.strips.shown : []) {
+      if (lines.length >= maxRows) break
+      const ast = STYLE[AGENT_STYLE[ag.state]]
+      lines.push(
+        Box({
+          flexDirection: 'row',
+          columnGap: 1,
+          children: [
+            Text({ children: [ag.depth ? '    ' : '  '] }),
+            Text({ color: ast.fill, children: [ag.state === 'running' && frame % 6 < 3 ? '○' : '●'] }),
+            Box({ width: labelW - 1, flexShrink: 0, children: [Text({ color: '#c9c7c1', wrap: 'truncate', children: [trunc((ag.depth ? '↳ ' : '') + ag.title, labelW - 1)] })] }),
+            Text({ color: ast.fill, wrap: 'truncate', children: [stripTool(ag)] }),
+            ...(ag.model ? [Text({ color: '#1e1e1e', backgroundColor: tierColor(ag.model, false), children: [' ' + ag.model + ' '] })] : []),
+            Box({ flexGrow: 1, children: [] }),
+            Text({ color: DIM, children: [elapsed((ag.endedAt ?? nowMs) - ag.startedAt)] }),
+          ],
+        }),
+      )
+    }
+    if (row.strips?.hidden.length && lines.length < maxRows) lines.push(Text({ color: DIM, children: ['    +' + row.strips.hidden.length + ' more agents'] }))
+  }
+  return Box({ flexDirection: 'column', children: [...lane, header, ...lines] })
+}
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
@@ -1222,6 +1531,13 @@ export function register(on) {
       const want = a === 'expand' ? true : a === 'collapse' ? false : !isOpening()
       setOpen($, want)
       return { text: want ? 'Deck expanded.' : 'Deck collapsed.' }
+    }
+    else if (a === 'panel' && (!b || b === 'on')) {
+      await $.ui.open({ id: 'deck-panel', title: 'Deck' })
+      return { text: 'Deck opened in a panel.' }
+    } else if (a === 'panel' && b === 'off') {
+      await $.ui.close({ id: 'deck-panel' })
+      return { text: 'Deck panel closed.' }
     }
     else if (a === 'help') reply = HELP
     else if (a === 'status') reply = statusText()
@@ -1634,305 +1950,6 @@ export function register(on) {
     })
   })
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    if (e.props.hasSurvey) return next(e)
-    const { Box, Text, Button, Svg, Image } = $.ui.resolve(e)
-    const desktop = e.surface !== 'terminal' // desktop, VS Code and mobile all draw Svg
-    if (e.surface === 'terminal') sawTerminal = true
-    const nowMs = Date.now()
-    const cols = Math.max(40, e.props.bodyColumns ?? e.viewport?.columns ?? 100)
-    const rows = collectRows(nowMs)
-    const extras = []
-    if (prefs.show.clock) extras.push((desktop ? '◷ ' : '') + clockText())
-    const wt = prefs.show.weather ? weatherText(desktop) : ''
-    if (wt) extras.push(wt)
-    if (!rows.length && !extras.length && !prefs.show.pet) return next(e)
-
-    // the pet's lane
-    const lane = []
-    const inlinePet = desktop && Svg && prefs.show.pet && prefs.open && rows.length && prefs.size !== 'roomy'
-    if (prefs.show.pet && !inlinePet) {
-      if (desktop && Svg) {
-        const W = Math.max(320, cols * 8)
-        const LH = prefs.size === 'roomy' ? 54 : 44
-        lane.push(Svg({ source: petLaneSvg(pet, nowMs, W, LH), alt: 'Claude pet, ' + pet.act, width: W, height: LH }))
-      } else if (!desktop && Image) {
-        // leave a margin: a row as wide as the band gets cut and marked with [-]
-        const room = Math.max(0, cols - PET_COLS - 4)
-        const x = Math.round(petX(pet, nowMs) * room)
-        const px = petFrame(pet.act, nowMs - pet.start, pet.dir)
-        lane.push(
-          Box({
-            flexDirection: 'row',
-            height: PET_ROWS,
-            overflow: 'hidden',
-            children: [
-              Box({ width: x, flexShrink: 0, children: [] }),
-              Image({ key: 'pet', source: { rgba: toBase64(px), width: PET_RASTER.width, height: PET_RASTER.height }, columns: PET_COLS, rows: PET_ROWS, alt: ' ' }),
-            ],
-          }),
-        )
-      }
-    }
-
-    const toggle = Button({
-      key: 'deck-toggle',
-      label: isOpening() ? 'deck ▾' : 'deck ▸',
-      plain: true,
-      hotkey: '0',
-      dimColor: true,
-      onPress: () => setOpen($, !isOpening()),
-    })
-    const extrasText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [extras.join('  ·  ')] })] })
-    const spacer = Box({ flexGrow: 1, children: [] })
-
-    // ----- collapsed, rings: a ring per limit, its reset, and spend -----
-    if ((!prefs.open || !rows.length) && prefs.collapsed === 'rings') {
-      const items = []
-      const ask = rows.find((r) => r.state === 'needs_input')
-      if (ask) items.push(Text({ color: STYLE.ask.fill, children: ['? ' + trunc(ask.title, 24) + ' needs you'] }))
-      for (const row of rows.filter((r) => r.limit)) {
-        const st = STYLE[row.style]
-        const tag = row.kindKey === 'five_hour' ? '5h' : row.kindKey === 'seven_day' ? '7d' : row.title
-        const ring = desktop
-          ? Svg({ alt: tag + ' ' + Math.round(row.pct) + '% used', width: 22, height: 22, source: ringSvg(row.pct, st.desk, row.kindKey === 'seven_day' ? 'week' : 'clock') })
-          : Text({ color: st.fill, children: ['○◔◑◕●'[Math.min(4, Math.round(row.pct / 25))]] })
-        items.push(
-          Box({
-            flexDirection: 'row',
-            flexShrink: 0,
-            columnGap: 1,
-            alignItems: 'center',
-            children: [ring, Text({ color: TEXT, bold: true, wrap: 'truncate', children: [Math.round(row.pct) + '%'] }), Text({ color: MUTED, wrap: 'truncate', children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
-          }),
-        )
-      }
-      if (prefs.cost) {
-        items.push(
-          Box({
-            flexDirection: 'row',
-            flexShrink: 0,
-            columnGap: 1,
-            alignItems: 'center',
-            children: [
-              desktop ? Svg({ alt: 'spend', width: 22, height: 22, source: ringSvg(100, STYLE.done.desk, 'usd') }) : Text({ color: STYLE.done.fill, children: ['$'] }),
-              Text({ color: STYLE.done.fill, bold: true, wrap: 'truncate', children: [fmtUsd(spend.dayUsd)] }),
-              Text({ color: MUTED, wrap: 'truncate', children: ['today · ' + fmtUsd(spend.monthUsd) + ' this month'] }),
-            ],
-          }),
-        )
-      }
-      const busy = rows.find((r) => (r.kind === 'bar' || r.kind === 'activity') && r.animating && r.state !== 'needs_input')
-      if (busy) items.push(Box({ flexShrink: 1, children: [Text({ color: MUTED, wrap: 'truncate', children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] })] }))
-      const line = Box({
-        flexDirection: 'row',
-        columnGap: 2,
-        alignItems: 'center',
-        children: [
-          ...(rows.length ? [toggle] : []),
-          Box({ flexDirection: 'row', flexShrink: 1, overflow: 'hidden', columnGap: desktop ? 4 : 3, alignItems: 'center', children: items }),
-          spacer,
-          extrasText,
-        ],
-      })
-      return Box({ flexDirection: 'column', children: [...lane, line] })
-    }
-
-    // ----- collapsed, text: one plain status line, clock and weather at its end -----
-    if ((!prefs.open || !rows.length) && prefs.collapsed === 'text') {
-      const parts = []
-      for (const row of collapsedOrder(rows)) {
-        const st = STYLE[row.style]
-        if (parts.length) parts.push(Text({ children: ['  '] }))
-        if (row.kind === 'route') {
-          parts.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: ['⇄ '] }))
-          parts.push(Text({ color: MUTED, children: [row.to + (row.effort ? ' · ' + row.effort : '')] }))
-          continue
-        }
-        parts.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
-        parts.push(Text({ color: row.state === 'needs_input' ? st.fill : MUTED, children: [row.short] }))
-      }
-      if (extras.length) parts.push(Text({ color: MUTED, children: [(parts.length ? '  ' : '') + [...extras].reverse().join('  ')] }))
-      const line = Box({
-        flexDirection: 'row',
-        columnGap: 1,
-        children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', flexShrink: 1, children: [Text({ wrap: 'truncate', children: parts })] })],
-      })
-      return Box({ flexDirection: 'column', children: [...lane, line] })
-    }
-
-    // ----- collapsed, chips: one line of chips, limits first -----
-    if (!prefs.open || !rows.length) {
-      const chips = []
-      // the terminal counts columns; the desktop counts pixels (about 8 per column, ~7.5 per character)
-      let budget = desktop ? cols * 8 - 140 - extras.join('  ·  ').length * 7.5 : cols - 10 - extras.join('  ·  ').length
-      let hidden = 0
-      for (const row of collapsedOrder(rows)) {
-        const st = STYLE[row.style]
-        const w = desktop ? row.short.length * 8.5 + 76 : row.short.length + 10
-        if (w > budget) {
-          hidden++
-          continue
-        }
-        budget -= w
-        if (chips.length) chips.push(Text({ color: TRACK, children: [' │ '] }))
-        if (row.kind === 'route') {
-          chips.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: [row.short + ' '] }))
-          continue
-        }
-        chips.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
-        const chipText = { color: row.state === 'needs_input' ? st.fill : row.limit ? TEXT : '#c9c7c1', children: [row.short + ' '] }
-        if (row.limit) chipText.bold = true
-        chips.push(Text(chipText))
-        chips.push(
-          desktop
-            ? Svg({
-                alt: row.title + ' ' + Math.round(row.pct) + '%',
-                width: 36,
-                height: 8,
-                source: `<svg xmlns="http://www.w3.org/2000/svg" width="36" height="8"><rect width="36" height="8" rx="4" fill="#808080" fill-opacity=".2"/><rect width="${Math.max((36 * row.pct) / 100, row.pct > 0 ? 4 : 0)}" height="8" rx="4" fill="${st.desk}"/></svg>`,
-              })
-            : Box({ flexDirection: 'row', children: runs(Text, terminalMini(prefs.style.terminal, row, 5)) }),
-        )
-      }
-      if (hidden) chips.push(Text({ color: DIM, children: ['  +' + hidden] }))
-      const line = Box({
-        flexDirection: 'row',
-        columnGap: 1,
-        alignItems: 'center',
-        children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', alignItems: 'center', children: chips }), spacer, extrasText],
-      })
-      return Box({ flexDirection: 'column', children: [...lane, line] })
-    }
-
-    // ----- expanded -----
-    const close = (row) =>
-      Button({
-        key: 'x-' + row.id,
-        label: '✕',
-        plain: true,
-        dimColor: true,
-        onPress: async () => {
-          if (row.kind === 'activity') {
-            for (const ag of [...agents.values()]) if (ag.home === 'activity') agents.delete(ag.id)
-            activity = null
-          }
-          else if (row.kind === 'bar') {
-            const bar = row.bar
-            for (const ag of agentsOf(bar)) agents.delete(ag.id)
-            if (bar.id === 'todo' || bar.id === 'tasks') bar.dismissed = true
-            else bars.delete(bar.id)
-            if (bar.id === 'tasks') tasks.clear()
-            if (bar.id === 'demo' && demoTimer) demoTimer.cancel()
-          } else {
-            prefs.show[row.kind === 'route' ? 'route' : row.section] = false
-            await $.store.set('prefs', prefs)
-          }
-          $.ui.invalidate('ui.render')
-        },
-      })
-    // compact: the pet walks the header line, between the row count and the clock
-    const petW = Math.max(80, Math.round(Math.max(320, cols * 8) - 170 - extras.join('  ·  ').length * 7.5))
-    const headerMid = inlinePet
-      ? Box({ flexGrow: 1, overflow: 'hidden', children: [Svg({ source: petLaneSvg(pet, nowMs, petW, 28, 0.7), alt: 'Claude pet, ' + pet.act, width: petW, height: 28 })] })
-      : spacer
-    const header = Box({
-      flexDirection: 'row',
-      columnGap: 1,
-      alignItems: 'center',
-      children: [toggle, Text({ color: DIM, children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, extrasText],
-    })
-
-    if (desktop) {
-      const total = Math.max(320, cols * 8)
-      const titleW = Math.min(TITLE_MAX_PX, Math.round(total * 0.28), Math.max(...rows.map((r) => Math.round(textWidth(trunc(r.title, TITLE_MAX_CH), 6.4)))))
-      const trackW = Math.max(120, Math.min(1400, total - titleW - RIGHT_W - 70))
-      const shown = rows.slice(0, foldCount(rows.length, nowMs))
-      const lines = shown.map((row, i) => {
-        const st = STYLE[row.style]
-        const svg = rowSvg(row, trackW, nowMs)
-        if (fold && fold.dir === 'open') svg.source = withFadeIn(svg.source, foldAge(nowMs) - i * FOLD_STEP)
-        const alt =
-          row.kind === 'route'
-            ? 'Model route: ' + row.from + ' to ' + row.to + (row.effort ? ', effort ' + row.effort : '')
-            : row.title + ': ' + row.name + (row.count ? ' ' + row.count : '') + ', ' + row.right + (row.strips ? '; agents: ' + row.strips.shown.map((ag) => ag.title + ' ' + ag.state).join(', ') : '')
-        return Box({
-          key: 'row-' + row.id,
-          flexDirection: 'row',
-          alignItems: row.strips ? 'flex-start' : 'center',
-          gap: 1,
-          children: [
-            Text({ color: st.desk, children: [row.kind === 'route' ? '⇄' : st.glyph] }),
-            Text({ wrap: 'truncate', children: [trunc(row.title, TITLE_MAX_CH)] }),
-            Box({ flexGrow: 1, children: [] }),
-            Svg({ source: svg.source, alt, width: svg.width, height: svg.height }),
-            close(row),
-          ],
-        })
-      })
-      return Box({ flexDirection: 'column', gap: prefs.size === 'roomy' ? 1 : 0, children: [...lane, header, ...lines] })
-    }
-
-    // terminal
-    const maxRows = Math.max(2, (e.props.maxRows ?? 14) - 1 - (lane.length ? PET_ROWS : 0))
-    const labelW = Math.min(24, Math.max(12, Math.floor(cols * 0.2)))
-    const rightW = 12
-    const barW = Math.max(16, cols - labelW - rightW - 8)
-    const lines = []
-    for (const row of rows.slice(0, foldCount(rows.length, nowMs))) {
-      if (lines.length >= maxRows) break
-      const st = STYLE[row.style]
-      if (row.kind === 'route') {
-        const { cells, dirColor } = routeCellsTerminal(row)
-        lines.push(
-          Box({
-            flexDirection: 'row',
-            columnGap: 1,
-            children: [
-              Text({ color: STYLE.run.fill, children: ['⇄'] }),
-              Box({ width: labelW, flexShrink: 0, children: [Text({ color: TEXT, children: [row.title] })] }),
-              Box({ flexGrow: 1, flexDirection: 'row', children: runs(Text, cells.slice(0, barW)) }),
-              Box({ width: rightW, flexShrink: 0, justifyContent: 'flex-end', children: [Text({ color: dirColor, children: [row.right] })] }),
-              close(row),
-            ],
-          }),
-        )
-        continue
-      }
-      lines.push(
-        Box({
-          flexDirection: 'row',
-          columnGap: 1,
-          children: [
-            Text({ color: st.fill, children: [st.glyph] }),
-            Box({ width: labelW, flexShrink: 0, children: [Text({ color: TEXT, wrap: 'truncate', children: [trunc(row.title, labelW)] })] }),
-            Box({ flexGrow: 1, flexDirection: 'row', children: runs(Text, terminalBar(prefs.style.terminal, row, barW, frame)) }),
-            Box({ width: rightW, flexShrink: 0, justifyContent: 'flex-end', children: [Text({ color: MUTED, children: [row.right] })] }),
-            close(row),
-          ],
-        }),
-      )
-      for (const ag of row.strips ? row.strips.shown : []) {
-        if (lines.length >= maxRows) break
-        const ast = STYLE[AGENT_STYLE[ag.state]]
-        lines.push(
-          Box({
-            flexDirection: 'row',
-            columnGap: 1,
-            children: [
-              Text({ children: [ag.depth ? '    ' : '  '] }),
-              Text({ color: ast.fill, children: [ag.state === 'running' && frame % 6 < 3 ? '○' : '●'] }),
-              Box({ width: labelW - 1, flexShrink: 0, children: [Text({ color: '#c9c7c1', wrap: 'truncate', children: [trunc((ag.depth ? '↳ ' : '') + ag.title, labelW - 1)] })] }),
-              Text({ color: ast.fill, wrap: 'truncate', children: [stripTool(ag)] }),
-              ...(ag.model ? [Text({ color: '#1e1e1e', backgroundColor: tierColor(ag.model, false), children: [' ' + ag.model + ' '] })] : []),
-              Box({ flexGrow: 1, children: [] }),
-              Text({ color: DIM, children: [elapsed((ag.endedAt ?? nowMs) - ag.startedAt)] }),
-            ],
-          }),
-        )
-      }
-      if (row.strips?.hidden.length && lines.length < maxRows) lines.push(Text({ color: DIM, children: ['    +' + row.strips.hidden.length + ' more agents'] }))
-    }
-    return Box({ flexDirection: 'column', children: [...lane, header, ...lines] })
-  })
+  on('ui.render', { component: 'AbovePrompt' }, deckView)
+  on('ui.render', { component: 'Pane' }, deckView)
 }

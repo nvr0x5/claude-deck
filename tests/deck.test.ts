@@ -234,6 +234,21 @@ test('VS Code gets the Desktop look', async ($, on) => {
   expect(drawn).not.toContain('"type":"Image"')
 })
 
+test('/deck panel draws the expanded Deck in a pane, for VS Code', async ($, on) => {
+  stubs(on)
+  await start($)
+  await $.command.run({ command: 'deck', args: 'collapse' })
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  const out = await $.command.run({ command: 'deck', args: 'panel' })
+  expect(out.text).toBe('Deck opened in a panel.')
+  const pane = await $.ui.mount({ ...PICKER, requestId: 'deck-panel', props: { ...PICKER.props, title: 'Deck' }, surface: 'vscode' })
+  const drawn = JSON.stringify(await pane.drawn())
+  expect(drawn).toContain('"type":"Svg"')
+  // expanded even while the band is collapsed, every row at once
+  expect(drawn).toContain('· 4 rows')
+  expect(drawn).toContain('Weekly · 7d')
+})
+
 test('the footer HUD button counts bars and toggles the HUD', async ($, on) => {
   const { saved } = stubs(on)
   await start($)
