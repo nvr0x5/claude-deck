@@ -222,6 +222,18 @@ test('a router with no answer shows the reason, not a stale route', { plugins: [
   expect(await term.find({ type: 'Text', text: /! typesafe 402/ })).toBeDefined()
 })
 
+test('VS Code gets the Desktop look', async ($, on) => {
+  stubs(on)
+  await start($)
+  await $.command.run({ command: 'deck', args: 'expand' })
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
+  const drawn = JSON.stringify(await ui.drawn())
+  expect(drawn).toContain('"type":"Svg"')
+  expect(drawn).toContain('· 4 rows')
+  expect(drawn).not.toContain('"type":"Image"')
+})
+
 test('the footer HUD button counts bars and toggles the HUD', async ($, on) => {
   const { saved } = stubs(on)
   await start($)

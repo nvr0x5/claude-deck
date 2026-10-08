@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7
+
+- Claude Code for VS Code gets the Desktop look (SVG bars and the animated pet) instead of the terminal's text bars. Untested in the real extension so far.
+
 ## 0.4.6
 
 - The Model route row now tells a suggestion from a change. "↓ cheaper" and "↑ deeper" appear only when the router really switched the model; when Jev picks a model the router doesn't apply (main-model routing is off by default), the row says `= kept` and "not applied".

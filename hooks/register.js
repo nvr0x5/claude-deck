@@ -1579,7 +1579,7 @@ export function register(on) {
   on('ui.render', { component: 'Pane' }, async ($, e, next) => {
     if (e.requestId !== 'deck-style') return next(e)
     const { Box, Text, Button, Svg } = $.ui.resolve(e)
-    const desktop = e.surface === 'desktop'
+    const desktop = e.surface !== 'terminal' // desktop, VS Code and mobile all draw Svg
     const nowMs = Date.now()
     const list = desktop ? DESKTOP_STYLES : TERMINAL_STYLES
     const names = desktop ? DESKTOP_STYLE_NAMES : TERMINAL_STYLE_NAMES
@@ -1614,7 +1614,7 @@ export function register(on) {
                 hotkey: String(i + 1),
                 onPress: async (ev) => {
                   const surface = ev?.surface ?? e.surface
-                  if (surface === 'desktop') prefs.style.desktop = name
+                  if (surface !== 'terminal') prefs.style.desktop = name
                   else prefs.style.terminal = name
                   $.ui.invalidate('ui.render')
                   await $.store.set('prefs', prefs)
@@ -1637,7 +1637,7 @@ export function register(on) {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey) return next(e)
     const { Box, Text, Button, Svg, Image } = $.ui.resolve(e)
-    const desktop = e.surface === 'desktop'
+    const desktop = e.surface !== 'terminal' // desktop, VS Code and mobile all draw Svg
     if (e.surface === 'terminal') sawTerminal = true
     const nowMs = Date.now()
     const cols = Math.max(40, e.props.bodyColumns ?? e.viewport?.columns ?? 100)
