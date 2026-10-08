@@ -55,6 +55,8 @@ In Claude Code:
 
 Then run `/deck demo` to see it. In a fresh session the demo fills in a sample model route and sample limits until the real ones arrive.
 
+**VS Code:** the Claude Code extension's chat panel runs `/deck` commands but doesn't draw a mod's panel above the prompt yet. Turn on the extension's `Claude Code: Use Terminal` setting (or run `claude` in VS Code's terminal) and you get the full Deck. The pet needs a terminal that shows images, so it may stay hidden there.
+
 Mods need Claude Code 2.1.286 or later. To try it from a clone without installing, run `claude --plugin-dir ./claude-deck`.
 
 ## What you get

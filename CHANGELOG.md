@@ -2,7 +2,7 @@
 
 ## 0.4.7
 
-- Claude Code for VS Code gets the Desktop look (SVG bars and the animated pet) instead of the terminal's text bars. Untested in the real extension so far.
+- Claude Code for VS Code gets the Desktop look (SVG bars and the animated pet) once the extension draws mod panels. As of extension 2.1.294 its chat panel runs `/deck` but draws no panel; its terminal mode shows the full Deck.
 
 ## 0.4.6
 
