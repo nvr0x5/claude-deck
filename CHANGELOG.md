@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.6
+
+- The Model route row now tells a suggestion from a change. "↓ cheaper" and "↑ deeper" appear only when the router really switched the model; when Jev picks a model the router doesn't apply (main-model routing is off by default), the row says `= kept` and "not applied".
+- Route history: a filled square is a turn whose model the router changed, an outlined square is a suggestion only.
+
 ## 0.4.5
 
 - Compact Desktop rows get 3px of space above and below, so the pills of neighboring rows no longer touch.

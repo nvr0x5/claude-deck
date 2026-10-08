@@ -522,7 +522,8 @@ function readRouteStatus(text) {
   }
   const prev = route
   route = { ...(prev && Date.now() - prev.at < 5000 ? prev : {}), ...r }
-  routeHist.push(TIER_MODEL[r.tier] ?? r.tier)
+  // filled when the router changed the model, outlined when Jev only suggested it
+  routeHist.push(r.model ? r.model : '~' + (TIER_MODEL[r.tier] ?? r.tier))
   if (routeHist.length > 8) routeHist.shift()
   return true
 }
@@ -583,9 +584,11 @@ function routeRow() {
   const want = TIER_MODEL[route.tier] ?? route.tier
   const to = route.model || from
   const effort = route.effort || seen.effort || ''
-  const wantRank = MODEL_RANK[want]
+  const toRank = MODEL_RANK[to]
   const fromRank = MODEL_RANK[from]
-  const dir = route.unchanged ? '=' : wantRank != null && fromRank != null ? (wantRank < fromRank ? '↓' : wantRank > fromRank ? '↑' : '=') : '='
+  // only a model the router actually switched to counts as cheaper or deeper
+  const dir = !route.model ? '=' : toRank != null && fromRank != null ? (toRank < fromRank ? '↓' : toRank > fromRank ? '↑' : '=') : '='
+  const unapplied = want !== to
   return {
     id: 'route',
     kind: 'route',
@@ -599,6 +602,7 @@ function routeRow() {
     risky: route.risky ?? null,
     ms: route.ms ?? null,
     tier: route.tier,
+    unapplied,
     dir,
     right: dir === '↓' ? '↓ cheaper' : dir === '↑' ? '↑ deeper' : '= kept',
     short: '⇄ ' + to + (effort ? '·' + effort : ''),
@@ -768,14 +772,14 @@ function routeCellsTerminal(row) {
     push('  ! ' + row.reason, STYLE.warn.fill)
     if (row.hint) push(' · ' + row.hint, DIM)
     push('  ', MUTED)
-    for (const t of routeHist) push(t === 'none' ? '□' : '■', t === 'none' ? STYLE.warn.fill : tierColor(t, false))
+    for (const t of routeHist) push(...histCell(t))
     return { cells, dirColor: STYLE.warn.fill }
   }
   const dirColor = row.dir === '↓' ? STYLE.ok.fill : row.dir === '↑' ? STYLE.warn.fill : MUTED
   push(row.from + ' ', DIM)
   push(row.dir === '=' ? '= ' : '→ ', dirColor)
   push(' ' + row.to + ' ', '#1e1e1e', tierColor(row.to, false), true)
-  if (row.want !== row.to) push(' jev: ' + row.want, DIM)
+  if (row.unapplied) push(' jev: ' + row.want + ' · not applied', DIM)
   if (row.effort) {
     const lvl = Math.max(1, EFFORTS.indexOf(row.effort) + 1)
     push('  effort ', MUTED)
@@ -786,8 +790,21 @@ function routeCellsTerminal(row) {
   if (row.risky != null && row.risky > 0.7) push('  ⚠ risky', STYLE.hot.fill)
   if (row.ms != null) push('  ' + row.ms + 'ms', DIM)
   push('  ', MUTED)
-  for (const t of routeHist) push(t === 'none' ? '□' : '■', t === 'none' ? STYLE.warn.fill : tierColor(t, false))
+  for (const t of routeHist) push(...histCell(t))
   return { cells, dirColor }
+}
+
+// one route-history slot: a failure, a suggestion the router did not apply, or an applied model
+function histSquare(t, hx) {
+  if (t === 'none') return `<rect x="${hx + 0.5}" y="8" width="6" height="6" rx="2" fill="none" stroke="${STYLE.warn.desk}"/>`
+  if (t.startsWith('~')) return `<rect x="${hx + 0.75}" y="8.25" width="5.5" height="5.5" rx="1.75" fill="none" stroke="${tierColor(t.slice(1))}" stroke-width="1.5"/>`
+  return `<rect x="${hx}" y="7.5" width="7" height="7" rx="2" fill="${tierColor(t)}" fill-opacity=".85"/>`
+}
+
+function histCell(t) {
+  if (t === 'none') return ['□', STYLE.warn.fill]
+  if (t.startsWith('~')) return ['□', tierColor(t.slice(1), false)]
+  return ['■', tierColor(t, false)]
 }
 
 function routeSvg(row, W) {
@@ -809,9 +826,7 @@ function routeSvg(row, W) {
     if (x + 12 + histW <= W) {
       let hx = Math.max(x + 12, W - histW)
       for (const t of routeHist) {
-        o += t === 'none'
-          ? `<rect x="${hx + 0.5}" y="8" width="6" height="6" rx="2" fill="none" stroke="${STYLE.warn.desk}"/>`
-          : `<rect x="${hx}" y="7.5" width="7" height="7" rx="2" fill="${tierColor(t)}" fill-opacity=".85"/>`
+        o += histSquare(t, hx)
         hx += 10
       }
     }
@@ -851,13 +866,15 @@ function routeSvg(row, W) {
     out += `<text x="${x}" y="15" style="font:500 11.5px ${F};fill:${STYLE.hot.desk}">⚠ risky</text>`
     x += 56
   }
+  if (row.unapplied) {
+    out += `<text x="${x}" y="15" style="font:400 11.5px ${F};fill:#77756f">not applied</text>`
+    x += 72
+  }
   const histW = routeHist.length * 10
   if (x + 12 + histW > W) return out
   let hx = Math.max(x + 12, W - histW)
   for (const t of routeHist) {
-    out += t === 'none'
-      ? `<rect x="${hx + 0.5}" y="8" width="6" height="6" rx="2" fill="none" stroke="${STYLE.warn.desk}"/>`
-      : `<rect x="${hx}" y="7.5" width="7" height="7" rx="2" fill="${tierColor(t)}" fill-opacity=".85"/>`
+    out += histSquare(t, hx)
     hx += 10
   }
   return out
@@ -1092,7 +1109,7 @@ function statusText() {
       continue
     }
     if (r.kind === 'route') {
-      lines.push('⇄ Model route — ' + r.from + ' ' + (r.dir === '=' ? '=' : '→') + ' ' + r.to + (r.effort ? ' · effort ' + r.effort : '') + ' · jev ' + r.tier + (r.conf != null ? ' ' + r.conf.toFixed(2) : '') + ' (' + r.right + ')')
+      lines.push('⇄ Model route — ' + r.from + ' ' + (r.dir === '=' ? '=' : '→') + ' ' + r.to + (r.effort ? ' · effort ' + r.effort : '') + ' · jev ' + r.tier + (r.conf != null ? ' ' + r.conf.toFixed(2) : '') + (r.unapplied ? ', suggested ' + r.want + ', not applied' : '') + ' (' + r.right + ')')
       continue
     }
     lines.push(STYLE[r.style].glyph + ' ' + r.title + ' — ' + r.name + (r.count ? ' ' + r.count : '') + (r.right ? ' (' + r.right + ')' : ''))

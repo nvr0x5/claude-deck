@@ -128,7 +128,7 @@ Deck works on its own, and it's better with **[jev-model-router](https://github.
 
 | Where | What Deck shows |
 |---|---|
-| **Model route** row | Your model → the one the router picked (haiku, sonnet or opus), the effort, the confidence, a risk flag, how long the decision took, and the last eight decisions as colored squares |
+| **Model route** row | Your model → the one the router picked (haiku, sonnet or opus), the effort, the confidence, a risk flag, how long the decision took, and the last eight decisions as squares: filled when the router switched the model, outlined when Jev only suggested it. "↓ cheaper" or "↑ deeper" appears only when the model really changed |
 | **Agent strips** | The model each subagent was given, as a haiku, sonnet or opus tag |
 | **Collapsed line** | `⇄ opus · medium`, the current route at a glance |
 

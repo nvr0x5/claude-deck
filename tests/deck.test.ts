@@ -176,6 +176,29 @@ test("the router's status and log become the route row", { plugins: [fakeRouter]
   expect((await desk.find({ key: 'row-route' }))).toBeDefined()
 })
 
+// effort routed, model only suggested: the row must not claim a cheaper model
+const effortOnlyRouter = {
+  name: 'jev-model-router',
+  register(on) {
+    on('prompt.submit', async ($, e, next) => {
+      $.ui.log('[jev-model-router] jev: tier fast (0.91) · effort 0.2 → low (0.8) · risky 0.01 · 200ms')
+      $.ui.status('jev · fast 0.91 → low')
+      return next(e)
+    })
+  },
+}
+
+test('a suggested model the router did not apply reads as kept, not cheaper', { plugins: [effortOnlyRouter] }, async ($, on) => {
+  stubs(on)
+  await start($)
+  await $.command.run({ command: 'deck', args: 'expand' })
+  await $.prompt.submit({ text: 'rename a variable' })
+  const out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/opus = opus · effort low · jev fast 0\.91, suggested haiku, not applied \(= kept\)/)
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: /jev: haiku · not applied/ })).toBeDefined()
+})
+
 // a router whose backend refuses: the row says so instead of showing the last good route
 const brokeRouter = {
   name: 'jev-model-router',
