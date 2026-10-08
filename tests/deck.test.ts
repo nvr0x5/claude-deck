@@ -249,6 +249,14 @@ test('/deck panel draws the expanded Deck in a pane, for VS Code', async ($, on)
   expect(drawn).toContain('Weekly · 7d')
 })
 
+test('/deck version names the running version', async ($, on) => {
+  stubs(on)
+  await start($)
+  // CI checks the number against .claude-plugin/plugin.json
+  const out = await $.command.run({ command: 'deck', args: 'version' })
+  expect(out.text).toMatch(/^Deck \d+\.\d+\.\d+$/)
+})
+
 test('the footer HUD button counts bars and toggles the HUD', async ($, on) => {
   const { saved } = stubs(on)
   await start($)

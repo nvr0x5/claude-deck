@@ -34,6 +34,7 @@ const FOLD_MS = 5000
 const MAX_STRIPS = 4
 const ASK_DELAY_MS = 600
 const TRACK_H = 22
+const VERSION = '0.4.9' // keep in step with .claude-plugin/plugin.json (a test checks)
 const RIGHT_W = 92
 const TITLE_MAX_CH = 22 // a long prompt as a bar title would squeeze every track
 const TITLE_MAX_PX = 160
@@ -1121,7 +1122,8 @@ function statusText() {
     '\nShowing: ' + on + ' · ' + (prefs.open ? 'expanded' : 'collapsed') +
     ' · style ' + prefs.style.terminal + ' (CLI) / ' + prefs.style.desktop + ' (Desktop)' +
     ' · pet ' + pet.act + ' · auto-expand ' + (prefs.auto ? 'on' : 'off') + ' · sound ' + (prefs.sound ? 'on' : 'off') +
-    (prefs.city ? ' · city ' + prefs.city.name : '')
+    (prefs.city ? ' · city ' + prefs.city.name : '') +
+    ' · Deck ' + VERSION
   )
 }
 
@@ -1133,7 +1135,8 @@ const HELP = [
   '/deck <section> on|off     sections: ' + SECTIONS.join(', ') + ', all',
   '/deck city <name>          set the weather city (turns weather on)',
   "/deck quiet on|off         hide the router's own status and log lines while the HUD shows the route",
-  '/deck panel [off]          open Deck in a panel (for the VS Code extension, which has no band above the prompt)',
+  '/deck panel [off]          open Deck in a panel (terminal and Desktop; the VS Code extension draws none yet)',
+  '/deck version              show which Deck version is running',
   '/deck size compact|roomy   compact (default) packs the rows tighter on Desktop',
   '/deck collapsed chips|text|rings  collapsed look: chips with mini bars, one plain line, or limit rings',
   '/deck cost on|off         track spend today and this month (pay-per-use API keys)',
@@ -1539,6 +1542,7 @@ export function register(on) {
       await $.ui.close({ id: 'deck-panel' })
       return { text: 'Deck panel closed.' }
     }
+    else if (a === 'version') reply = 'Deck ' + VERSION
     else if (a === 'help') reply = HELP
     else if (a === 'status') reply = statusText()
     else if (a === 'style' && !b) {

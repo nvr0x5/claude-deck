@@ -18,3 +18,7 @@ jobs:
         run: claude plugin validate .
       - name: Test
         run: claude plugin test
+      - name: Version in step
+        run: |
+          want=$(node -p "require('./.claude-plugin/plugin.json').version")
+          grep -q "const VERSION = '$want'" hooks/register.js || { echo "hooks/register.js VERSION is not $want"; exit 1; }

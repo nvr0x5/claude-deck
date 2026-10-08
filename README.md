@@ -55,7 +55,7 @@ In Claude Code:
 
 Then run `/deck demo` to see it. In a fresh session the demo fills in a sample model route and sample limits until the real ones arrive.
 
-**VS Code:** the Claude Code extension's chat panel has no band above the prompt, so run `/deck panel` there: Deck opens in a panel of its own, always expanded, with the Desktop look. `/deck panel off` closes it. In the extension's terminal mode (`Claude Code: Use Terminal`) you get the usual Deck; the pet needs a terminal that shows images.
+**VS Code:** the Claude Code extension's chat panel runs `/deck` commands but doesn't draw a mod's band or panels yet (checked with extension 2.1.294). Turn on the extension's `Claude Code: Use Terminal` setting, or run `claude` in VS Code's terminal, and you get the full Deck; the pet needs a terminal that shows images.
 
 Mods need Claude Code 2.1.286 or later. To try it from a clone without installing, run `claude --plugin-dir ./claude-deck`.
 
@@ -112,7 +112,8 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel`, `spark` |
 | `/deck <section> on\|off` | `plans agents context limits route pet clock weather all` |
 | `/deck city <name>` | Weather city |
-| `/deck panel [off]` | Open Deck in a panel of its own, for the VS Code extension |
+| `/deck panel [off]` | Open Deck in a panel of its own, always expanded |
+| `/deck version` | Show which Deck version is running |
 | `/deck size compact\|roomy` | Row spacing on Desktop (compact is the default) |
 | `/deck collapsed chips\|text\|rings` | Collapsed look: chips with mini bars, one plain line, or limit rings |
 | `/deck cost on\|off` | Track spend today and this month |

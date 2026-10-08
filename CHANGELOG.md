@@ -1,8 +1,13 @@
 # Changelog
 
+## 0.4.9
+
+- `/deck version` shows which Deck version is running; `/deck status` ends with it too.
+- README: the VS Code extension's chat panel draws neither Deck's band nor its panel yet; use its terminal mode.
+
 ## 0.4.8
 
-- `/deck panel` opens Deck in a panel of its own, always expanded. The VS Code extension's chat panel draws mod panels but not the band above the prompt, so this is how to see Deck there. `/deck panel off` closes it.
+- `/deck panel` opens Deck in a panel of its own, always expanded; `/deck panel off` closes it. It was meant for the VS Code extension, but as of extension 2.1.294 its chat panel draws no mod panels either.
 
 ## 0.4.7
 
