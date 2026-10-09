@@ -1170,6 +1170,9 @@ async function deckView($, e, next) {
   const { Box, Text, Button, Svg, Image } = $.ui.resolve(e)
   const desktop = e.surface !== 'terminal' // desktop, VS Code and mobile all draw Svg
   if (e.surface === 'terminal') sawTerminal = true
+  // TEXT/MUTED/DIM/TRACK are tuned for a dark background and vanish on a light desktop theme;
+  // there, plain text takes the theme's foreground and grey text uses dimColor instead
+  const tone = (c) => (!desktop ? { color: c } : c === TEXT || c === '#c9c7c1' ? {} : c === MUTED || c === DIM || c === TRACK ? { dimColor: true } : { color: c })
   const nowMs = Date.now()
   const cols = Math.max(40, e.props.bodyColumns ?? e.viewport?.columns ?? 100)
   const rows = collectRows(nowMs)
@@ -1214,7 +1217,7 @@ async function deckView($, e, next) {
     dimColor: true,
     onPress: () => setOpen($, !isOpening()),
   })
-  const extrasText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [extras.join('  ·  ')] })] })
+  const extrasText = Box({ flexShrink: 0, children: [Text({ ...tone(MUTED), children: [extras.join('  ·  ')] })] })
   const spacer = Box({ flexGrow: 1, children: [] })
 
   // ----- collapsed, rings: a ring per limit, its reset, and spend -----
@@ -1234,7 +1237,7 @@ async function deckView($, e, next) {
           flexShrink: 0,
           columnGap: 1,
           alignItems: 'center',
-          children: [ring, Text({ color: TEXT, bold: true, wrap: 'truncate', children: [Math.round(row.pct) + '%'] }), Text({ color: MUTED, wrap: 'truncate', children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
+          children: [ring, Text({ ...tone(TEXT), bold: true, wrap: 'truncate', children: [Math.round(row.pct) + '%'] }), Text({ ...tone(MUTED), wrap: 'truncate', children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
         }),
       )
     }
@@ -1248,13 +1251,13 @@ async function deckView($, e, next) {
           children: [
             desktop ? Svg({ alt: 'spend', width: 22, height: 22, source: ringSvg(100, STYLE.done.desk, 'usd') }) : Text({ color: STYLE.done.fill, children: ['$'] }),
             Text({ color: STYLE.done.fill, bold: true, wrap: 'truncate', children: [fmtUsd(spend.dayUsd)] }),
-            Text({ color: MUTED, wrap: 'truncate', children: ['today · ' + fmtUsd(spend.monthUsd) + ' this month'] }),
+            Text({ ...tone(MUTED), wrap: 'truncate', children: ['today · ' + fmtUsd(spend.monthUsd) + ' this month'] }),
           ],
         }),
       )
     }
     const busy = rows.find((r) => (r.kind === 'bar' || r.kind === 'activity') && r.animating && r.state !== 'needs_input')
-    if (busy) items.push(Box({ flexShrink: 1, children: [Text({ color: MUTED, wrap: 'truncate', children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] })] }))
+    if (busy) items.push(Box({ flexShrink: 1, children: [Text({ ...tone(MUTED), wrap: 'truncate', children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] })] }))
     const line = Box({
       flexDirection: 'row',
       columnGap: 2,
@@ -1277,13 +1280,13 @@ async function deckView($, e, next) {
       if (parts.length) parts.push(Text({ children: ['  '] }))
       if (row.kind === 'route') {
         parts.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: ['⇄ '] }))
-        parts.push(Text({ color: MUTED, children: [row.to + (row.effort ? ' · ' + row.effort : '')] }))
+        parts.push(Text({ ...tone(MUTED), children: [row.to + (row.effort ? ' · ' + row.effort : '')] }))
         continue
       }
       parts.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
-      parts.push(Text({ color: row.state === 'needs_input' ? st.fill : MUTED, children: [row.short] }))
+      parts.push(Text({ ...tone(row.state === 'needs_input' ? st.fill : MUTED), children: [row.short] }))
     }
-    if (extras.length) parts.push(Text({ color: MUTED, children: [(parts.length ? '  ' : '') + [...extras].reverse().join('  ')] }))
+    if (extras.length) parts.push(Text({ ...tone(MUTED), children: [(parts.length ? '  ' : '') + [...extras].reverse().join('  ')] }))
     const line = Box({
       flexDirection: 'row',
       columnGap: 1,
@@ -1306,13 +1309,13 @@ async function deckView($, e, next) {
         continue
       }
       budget -= w
-      if (chips.length) chips.push(Text({ color: TRACK, children: [' │ '] }))
+      if (chips.length) chips.push(Text({ ...tone(TRACK), children: [' │ '] }))
       if (row.kind === 'route') {
         chips.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: [row.short + ' '] }))
         continue
       }
       chips.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
-      const chipText = { color: row.state === 'needs_input' ? st.fill : row.limit ? TEXT : '#c9c7c1', children: [row.short + ' '] }
+      const chipText = { ...tone(row.state === 'needs_input' ? st.fill : row.limit ? TEXT : '#c9c7c1'), children: [row.short + ' '] }
       if (row.limit) chipText.bold = true
       chips.push(Text(chipText))
       chips.push(
@@ -1326,7 +1329,7 @@ async function deckView($, e, next) {
           : Box({ flexDirection: 'row', children: runs(Text, terminalMini(prefs.style.terminal, row, 5)) }),
       )
     }
-    if (hidden) chips.push(Text({ color: DIM, children: ['  +' + hidden] }))
+    if (hidden) chips.push(Text({ ...tone(DIM), children: ['  +' + hidden] }))
     const line = Box({
       flexDirection: 'row',
       columnGap: 1,
