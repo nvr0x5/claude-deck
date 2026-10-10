@@ -34,7 +34,7 @@ const FOLD_MS = 5000
 const MAX_STRIPS = 4
 const ASK_DELAY_MS = 600
 const TRACK_H = 22
-const VERSION = '0.4.9' // keep in step with .claude-plugin/plugin.json (a test checks)
+const VERSION = '0.4.10' // keep in step with .claude-plugin/plugin.json (a test checks)
 const RIGHT_W = 92
 const TITLE_MAX_CH = 22 // a long prompt as a bar title would squeeze every track
 const TITLE_MAX_PX = 160
@@ -560,7 +560,7 @@ function readRouteLog(text) {
 
 function routeRow() {
   if (!prefs.show.route || !route) return null
-  const from = shortModel(seen.model || sessionModel) || 'session'
+  const from = shortModel(sessionModel || seen.model) || 'session'
   if (route.noAnswer) {
     return {
       id: 'route',
@@ -1181,6 +1181,10 @@ async function deckView($, e, next) {
   const wt = prefs.show.weather ? weatherText(desktop) : ''
   if (wt) extras.push(wt)
   if (!rows.length && !extras.length && !prefs.show.pet) return next(e)
+  // a mod after deck in the hook chain also wants to draw AbovePrompt; stack its band under ours
+  // instead of swallowing it (https://github.com/nvr0x5/claude-deck/issues/2)
+  const below = await next(e)
+  const stack = (tree) => (below ? Box({ flexDirection: 'column', children: [tree, below] }) : tree)
 
   // the pet's lane
   const lane = []
@@ -1269,7 +1273,7 @@ async function deckView($, e, next) {
         extrasText,
       ],
     })
-    return Box({ flexDirection: 'column', children: [...lane, line] })
+    return stack(Box({ flexDirection: 'column', children: [...lane, line] }))
   }
 
   // ----- collapsed, text: one plain status line, clock and weather at its end -----
@@ -1292,7 +1296,7 @@ async function deckView($, e, next) {
       columnGap: 1,
       children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', flexShrink: 1, children: [Text({ wrap: 'truncate', children: parts })] })],
     })
-    return Box({ flexDirection: 'column', children: [...lane, line] })
+    return stack(Box({ flexDirection: 'column', children: [...lane, line] }))
   }
 
   // ----- collapsed, chips: one line of chips, limits first -----
@@ -1336,7 +1340,7 @@ async function deckView($, e, next) {
       alignItems: 'center',
       children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', alignItems: 'center', children: chips }), spacer, extrasText],
     })
-    return Box({ flexDirection: 'column', children: [...lane, line] })
+    return stack(Box({ flexDirection: 'column', children: [...lane, line] }))
   }
 
   // ----- expanded -----
@@ -1374,7 +1378,8 @@ async function deckView($, e, next) {
     flexDirection: 'row',
     columnGap: 1,
     alignItems: 'center',
-    children: [toggle, Text({ color: DIM, children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, extrasText],
+    // fix for light Desktop themes (https://github.com/nvr0x5/claude-deck/pull/1)
+    children: [toggle, Text({ ...tone(DIM), children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, extrasText],
   })
 
   if (desktop) {
@@ -1404,7 +1409,7 @@ async function deckView($, e, next) {
         ],
       })
     })
-    return Box({ flexDirection: 'column', gap: prefs.size === 'roomy' ? 1 : 0, children: [...lane, header, ...lines] })
+    return stack(Box({ flexDirection: 'column', gap: prefs.size === 'roomy' ? 1 : 0, children: [...lane, header, ...lines] }))
   }
 
   // terminal
@@ -1467,7 +1472,7 @@ async function deckView($, e, next) {
     }
     if (row.strips?.hidden.length && lines.length < maxRows) lines.push(Text({ color: DIM, children: ['    +' + row.strips.hidden.length + ' more agents'] }))
   }
-  return Box({ flexDirection: 'column', children: [...lane, header, ...lines] })
+  return stack(Box({ flexDirection: 'column', children: [...lane, header, ...lines] }))
 }
 
 export function register(on) {
@@ -1661,6 +1666,9 @@ export function register(on) {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    // refreshed before the router (or anything else) can switch this turn's model at turn.step,
+    // so the route row's "from" is what you picked, not what jev routed to
+    await readSessionModel($)
     if (e.text && !e.text.startsWith('/')) {
       lastPrompt = trunc(cleanPrompt(e.text), 40) || lastPrompt
       askedUser = false

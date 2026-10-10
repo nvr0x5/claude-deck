@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.10
+
+- Fixed: when a mod after Deck in the hook chain wanted to draw, Deck swallowed it instead of stacking the result underneath. Now `deckView` calls `next(e)` first and stacks whatever comes back. Fixes [#2](https://github.com/nvr0x5/claude-deck/issues/2) thanks to @MAXxATTAXx.
+- Fixed: the route row's `from` now shows the model you picked, not what Jev routed to. The `to` still shows Jev's pick. This makes the "not applied" badge's intent clear.
+- Expanded header row count now uses the theme foreground on Desktop light themes, matching the collapsed looks. Fixes [#1](https://github.com/nvr0x5/claude-deck/pull/1) thanks to @Larvan2.
+
 ## 0.4.9
 
 - `/deck version` shows which Deck version is running; `/deck status` ends with it too.

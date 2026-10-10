@@ -182,7 +182,7 @@ With a key, prompt text goes to TypeSafe. Run `/deck quiet off` and look for `re
 "jev-model-router@inline": { "options": { "provider": "typesafe", "typesafeApiKey": "YOUR_KEY", "routeMainModel": true } }
 ```
 
-This is off by default because switching models throws away the prompt cache, and re-caching long conversations can cost more than the cheaper model saves (especially with your 86% cache hit rate). Turn it on for short sessions or new conversations.
+This is off by default because switching models throws away the prompt cache, and re-caching long conversations can cost more than the cheaper model saves, especially on a high cache-hit-rate session. Turn it on for short sessions or new conversations.
 
 See the [router's README](https://github.com/davila7/claude-code-templates/tree/main/cli-tool/components/mods/productivity/jev-model-router) for other options.
 
