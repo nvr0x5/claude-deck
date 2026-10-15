@@ -71,6 +71,7 @@ Mods need Claude Code 2.1.286 or later. To try it from a clone without installin
 | **Spend** (optional) | What you've spent today and this month | Your session cost, added up across sessions. Turn on with `/deck cost on`; it matters on a pay-per-use API key |
 | **Model route** | Which model and effort a router picked, and how sure it was | [jev-model-router](#model-routing), if installed |
 | **Clock and weather** | Local time and the weather where you are | Open-Meteo, no key |
+| **Folder** | The folder the session works in (`~/Documents/deck`), in the expanded header; a long path is cut from the left | Your session |
 
 When something needs you (a permission prompt, a question, a reply ending in `?`), its row turns amber, a collapsed Deck opens by itself, and a soft alert plays. Steps tick, finished bars chime, and the last one plays a little fanfare.
 
@@ -110,7 +111,7 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck`, `0` in an empty prompt, or the **Deck** footer button | Collapse or expand |
 | `/deck style` | Style picker with live previews (keys 1–6) |
 | `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel`, `spark` |
-| `/deck <section> on\|off` | `plans agents context limits route pet clock weather all` |
+| `/deck <section> on\|off` | `plans agents context limits route pet clock weather folder all` |
 | `/deck city <name>` | Weather city |
 | `/deck panel [off]` | Open Deck in a panel of its own, always expanded |
 | `/deck version` | Show which Deck version is running |

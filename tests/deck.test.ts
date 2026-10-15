@@ -27,7 +27,7 @@ const PICKER = {
 const inAnHour = () => new Date(Date.now() + 3600_000 + 14 * 60_000).toISOString()
 
 // Everything Claude Code would answer for this mod
-function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ result: 'ok' }), usageValue: any = null) {
+function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ result: 'ok' }), usageValue: any = null, home = '/Users/you') {
   const clock = mock.clock(on)
   on('store.get', ($, e) => ({ value: saved.get(e.key) }))
   on('store.set', ($, e) => {
@@ -52,7 +52,15 @@ function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ 
       ],
     },
   }))
-  on('session.start', () => ({ cwd: '/work' }))
+  // the session's project folder starts where the session does; a test moves it to stand for /cd or a worktree move
+  const folder = { root: '/work' }
+  on('session.start', ($, e) => {
+    folder.root = e.cwd
+    return { cwd: e.cwd }
+  })
+  on('env.get', ($, e) => ({ value: e.name === 'HOME' ? home : undefined }))
+  on('session.root', () => ({ value: folder.root }))
+  on('classic.CwdChanged', () => ({}))
   on('prompt.submit', ($, e) => ({ text: e.text }))
   on('tool.call', toolCall)
   on('tool.check', () => ({ decision: 'ask' }))
@@ -61,11 +69,11 @@ function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ 
   on('session.measure', ($, e) => ({ changed: e.changed }))
   on('ui.log', () => ({ value: undefined }))
   on('ui.render', () => ({ type: 'Text', props: {}, children: ['engine'] }))
-  return { saved, clock }
+  return { saved, clock, folder }
 }
 
-async function start($) {
-  await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+async function start($, cwd = '/work') {
+  await $.session.start({ surface: 'terminal', isInteractive: true, cwd })
 }
 
 const TODOS = [
@@ -585,4 +593,126 @@ test('a narrow terminal drops the clock and cuts rows instead of wrapping them',
     expect(fixed).toBeLessThanOrEqual(26)
   }
   expect(await narrow.find({ type: 'Text', text: /^Context$/ })).toBeUndefined()
+})
+
+test('the expanded header shows the session folder with home as ~', async ($, on) => {
+  stubs(on)
+  await start($, '/Users/you/Documents/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: /^~\/Documents\/deck {2}· {2}\d\d:\d\d/ })).toBeDefined()
+  await term.unmount()
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  expect(await desk.find({ type: 'Text', text: /^▤ ~\/Documents\/deck {2}· {2}◷ / })).toBeDefined()
+  await desk.unmount()
+})
+
+test('a Linux home folder also reads as ~', async ($, on) => {
+  stubs(on, undefined, undefined, undefined, '/home/you')
+  await start($, '/home/you/src/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: /^~\/src\/deck / })).toBeDefined()
+})
+
+test("another user's folder is not shortened to ~", async ($, on) => {
+  stubs(on)
+  await start($, '/Users/Shared/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await term.find({ type: 'Text', text: /^\/Users\/Shared\/deck / })).toBeDefined()
+})
+
+test('a narrow Desktop pane cuts the folder to fit the header', async ($, on) => {
+  stubs(on)
+  await start($, '/Users/you/.claude-worktrees/claude-deck/some-very-long-branch-name/feat-x')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop', viewport: { columns: 40, rows: 40 }, props: { ...BAND.props, bodyColumns: 40 } })
+  const folder = await desk.find({ type: 'Text', text: /^▤ …\/.*feat-x/ })
+  expect(folder).toBeDefined()
+  expect(folder.children.join('').length).toBeLessThanOrEqual(20)
+})
+
+test('the collapsed line leaves the folder out', async ($, on) => {
+  stubs(on)
+  await start($, '/Users/you/Documents/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  for (const look of ['chips', 'text', 'rings']) {
+    await $.command.run({ command: 'deck', args: 'collapsed ' + look })
+    for (const surface of ['terminal', 'desktop'] as const) {
+      const ui = await $.ui.mount({ ...BAND, surface })
+      expect(await ui.find({ type: 'Text', text: /Documents\/deck/ })).toBeUndefined()
+      await ui.unmount()
+    }
+  }
+})
+
+test('/deck folder off hides the folder and is saved', async ($, on) => {
+  const { saved } = stubs(on)
+  await start($, '/Users/you/Documents/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  await $.command.run({ command: 'deck', args: 'folder off' })
+  expect((saved.get('prefs') as any).show.folder).toBe(false)
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Documents\/deck/ })).toBeUndefined()
+})
+
+test('a long folder is cut from the left, and a narrow terminal drops the clock before the folder', async ($, on) => {
+  stubs(on)
+  await start($, '/Users/you/.claude-worktrees/claude-deck/some-very-long-branch-name/feat-x')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  const cols = 60
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal', viewport: { columns: cols, rows: 40 }, props: { ...BAND.props, bodyColumns: cols } })
+  const folder = await ui.find({ type: 'Text', text: /^…\/.*feat-x/ })
+  expect(folder).toBeDefined()
+  const text = folder.children.join('')
+  expect(text.length + 20).toBeLessThanOrEqual(cols)
+  await ui.unmount()
+  const narrow = await $.ui.mount({ ...BAND, surface: 'terminal', viewport: { columns: 40, rows: 40 }, props: { ...BAND.props, bodyColumns: 40 } })
+  expect(await narrow.find({ type: 'Text', text: /\d\d:\d\d/ })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /^…\/.*feat-x$/ })).toBeDefined()
+})
+
+const header = (ui) => ui.find({ type: 'Text', text: /\d\d:\d\d:\d\d$/ })
+
+test('a folder change event moves the header to the new folder', async ($, on) => {
+  const { folder } = stubs(on)
+  await start($, '/Users/you/Documents/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  folder.root = '/Users/you/Documents/deck/.claude/worktrees/cwd-check'
+  await $.classic.CwdChanged({ old_cwd: '/Users/you/Documents/deck', new_cwd: folder.root })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await header(ui)).children.join('')).toMatch(/^~\/Documents\/deck\/\.claude\/worktrees\/cwd-check /)
+})
+
+test('a move with no event shows after the next tool call', async ($, on) => {
+  const { folder } = stubs(on)
+  await start($, '/Users/you/Documents/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  folder.root = '/Users/you/Documents/deck/.claude/worktrees/cwd-check'
+  await $.tool.call({ tool: 'EnterWorktree', name: 'cwd-check' })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    // Desktop has less room in the header, so the path may be cut from the left
+    expect((await header(ui)).children.join('')).toMatch(/(~\/Documents\/deck|…)\/\.claude\/worktrees\/cwd-check /)
+    await ui.unmount()
+  }
+})
+
+test('a shell cd alone leaves the header on the project folder', async ($, on) => {
+  stubs(on)
+  await start($, '/Users/you/Documents/deck')
+  await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
+  await $.command.run({ command: 'deck', args: 'expand' })
+  await $.tool.call({ tool: 'Bash', command: 'cd /tmp && ls' })
+  const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
+  expect((await header(ui)).children.join('')).toMatch(/^~\/Documents\/deck /)
 })

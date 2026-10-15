@@ -1,7 +1,7 @@
 // deck: a collapsible HUD in the band above the prompt.
 // Bars: todo lists, task tools, approved plans, and subagents as strips.
 // Meters: context and usage limits with reset countdowns. A model-route row shows what a
-// router (jev-model-router) decided. A pet walks above it all. Header: clock and weather.
+// router (jev-model-router) decided. A pet walks above it all. Header: folder, clock and weather.
 //
 // Desktop drawing techniques adapt plan-progress (zycck/claude-mods, MIT, Kirill Serditov).
 
@@ -10,10 +10,10 @@ import { TERMINAL_STYLES, TERMINAL_STYLE_NAMES, terminalBar, terminalMini } from
 import { DESKTOP_STYLES, DESKTOP_STYLE_NAMES, desktopTrack, stripsSvg, stripsHeight } from './styles-desktop.js'
 import { createPet, stepPet, petX, petLaneSvg, petFrame, PET_RASTER } from './pet.js'
 
-const SECTIONS = ['plans', 'agents', 'context', 'limits', 'route', 'pet', 'clock', 'weather']
+const SECTIONS = ['plans', 'agents', 'context', 'limits', 'route', 'pet', 'clock', 'weather', 'folder']
 
 const DEFAULT_PREFS = {
-  show: { plans: true, agents: true, context: true, limits: true, route: true, pet: true, clock: true, weather: false },
+  show: { plans: true, agents: true, context: true, limits: true, route: true, pet: true, clock: true, weather: false, folder: true },
   style: { terminal: 'solid', desktop: 'pixel' },
   open: false,
   auto: true,
@@ -51,6 +51,8 @@ let prefs = clone(DEFAULT_PREFS)
 let frame = 0
 let lastPrompt = ''
 let weather = null
+let cwd = ''
+let home = ''
 let usage = { context: null, rateLimits: [] }
 let sawTerminal = false
 let demoTimer = null
@@ -285,6 +287,25 @@ function shortCountdown(iso) {
 function elapsed(ms) {
   const s = Math.max(0, Math.round(ms / 1000))
   return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's'
+}
+
+// the session's folder with the home folder as ~, cut from the left to fit max characters
+function folderText(max) {
+  const path = home && (cwd === home || cwd.startsWith(home + '/')) ? '~' + cwd.slice(home.length) : cwd
+  if (path.length <= max) return path
+  const tail = path.slice(path.length - max + 2)
+  return tail.includes('/') ? '…/' + tail.slice(tail.indexOf('/') + 1) : '…' + path.slice(path.length - max + 1)
+}
+
+// the session's project folder moves with /cd, the Desktop app or a worktree move, not a shell cd
+async function refreshFolder($) {
+  try {
+    const root = await $.session.root()
+    if (root && root !== cwd) {
+      cwd = root
+      $.ui.invalidate('ui.render')
+    }
+  } catch {}
 }
 
 function clockText() {
@@ -1392,8 +1413,18 @@ async function deckView($, e, next) {
         $.ui.invalidate('ui.render')
       },
     })
+  // expanded only: the folder leads the header; a narrow header drops the weather and clock before it
+  let wide = extras
+  if (prefs.show.folder && cwd) {
+    // Desktop measures in pixels, about 8 per column and 7.5 per header character, like petW below
+    const fits = desktop ? Math.min(48, Math.floor((cols * 8 - 170) / 7.5)) : cols - HEADER_CH
+    const room = () => fits - (wide.length ? wide.join('  ·  ').length + 5 : 0) - (desktop ? 2 : 0)
+    while (wide.length && room() < 16) wide = wide.slice(0, -1)
+    wide = [(desktop ? '▤ ' : '') + folderText(room()), ...wide]
+  }
+  const wideText = Box({ flexShrink: 0, children: [Text({ ...tone(MUTED), children: [wide.join('  ·  ')] })] })
   // compact: the pet walks the header line, between the row count and the clock
-  const petW = Math.max(80, Math.round(Math.max(320, cols * 8) - 170 - extras.join('  ·  ').length * 7.5))
+  const petW = Math.max(80, Math.round(Math.max(320, cols * 8) - 170 - wide.join('  ·  ').length * 7.5))
   const headerMid = inlinePet
     ? Box({ flexGrow: 1, overflow: 'hidden', children: [Svg({ source: petLaneSvg(pet, nowMs, petW, 28, 0.7), alt: 'Claude pet, ' + pet.act, width: petW, height: 28 })] })
     : spacer
@@ -1402,7 +1433,7 @@ async function deckView($, e, next) {
     columnGap: 1,
     alignItems: 'center',
     // fix for light Desktop themes (https://github.com/nvr0x5/claude-deck/pull/1)
-    children: [toggle, Text({ ...tone(DIM), children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, extrasText],
+    children: [toggle, Text({ ...tone(DIM), children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, wideText],
   })
 
   if (desktop) {
@@ -1507,6 +1538,10 @@ async function deckView($, e, next) {
 
 export function register(on) {
   on('session.start', async ($, e, next) => {
+    cwd = e.cwd ?? ''
+    try {
+      home = ((await $.env.get('HOME')) ?? '').replace(/\/$/, '')
+    } catch {}
     const saved = await $.store.get('prefs')
     if (saved && typeof saved === 'object') {
       prefs = {
@@ -1824,6 +1859,12 @@ export function register(on) {
     return next(e)
   })
 
+  on('classic.CwdChanged', async ($, e, next) => {
+    const result = await next(e)
+    await refreshFolder($)
+    return result
+  })
+
   on('classic.SubagentStop', async ($, e, next) => {
     if (agents.has(e.agent_id)) {
       finishAgent(e.agent_id, 'done', 'Done')
@@ -1905,6 +1946,8 @@ export function register(on) {
       applyTaskResult(e, ran.result)
       $.ui.invalidate('ui.render')
     }
+    // a worktree move or /cd may have moved the project folder, with or without CwdChanged
+    if (!e.agentId) await refreshFolder($)
     if (e.tool === 'ExitPlanMode' && ok) {
       const text = typeof e.plan === 'string' ? e.plan : ran.result?.plan
       const parsed = typeof text === 'string' ? parsePlan(text) : null
