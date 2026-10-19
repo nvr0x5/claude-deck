@@ -8,6 +8,7 @@
   <img alt="Claude Code 2.1.286+" src="https://img.shields.io/badge/Claude%20Code-2.1.286%2B-9C95EC?style=flat-square&labelColor=14121a">
   <img alt="CLI and Desktop" src="https://img.shields.io/badge/runs%20in-CLI%20%2B%20Desktop-EBA83A?style=flat-square&labelColor=14121a">
   <a href="#model-routing"><img alt="Pairs with jev-model-router" src="https://img.shields.io/badge/pairs%20with-jev--model--router-5DCAA5?style=flat-square&labelColor=14121a"></a>
+  <a href="https://statuslin.es/mods/deck"><img alt="Listed on statuslin.es" src="https://img.shields.io/badge/listed%20on-statuslin.es-c96442?style=flat-square&labelColor=14121a"></a>
 </p>
 
 <p align="center">
