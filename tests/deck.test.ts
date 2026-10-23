@@ -147,7 +147,7 @@ test('the style picker lists every style and a key press picks one per surface',
 })
 
 test('collapsed line puts the usage limits first', async ($, on) => {
-  stubs(on)
+  stubs(on, new Map([['prefs', { always: false }]]))
   await start($)
   await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
@@ -202,7 +202,7 @@ test('a suggested model the router did not apply reads as kept, not cheaper', { 
   await $.command.run({ command: 'deck', args: 'expand' })
   await $.prompt.submit({ text: 'rename a variable' })
   const out = await $.command.run({ command: 'deck', args: 'status' })
-  expect(out.text).toMatch(/opus = opus · effort low · jev fast 0\.91, suggested haiku, not applied \(= kept\)/)
+  expect(out.text).toMatch(/opus = opus · effort low · jev fast 0\.91, suggested haiku, not applied \(kept\)/)
   const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect(await term.find({ type: 'Text', text: /jev: haiku · not applied/ })).toBeDefined()
 })
@@ -238,7 +238,7 @@ test('VS Code gets the Desktop look', async ($, on) => {
   const ui = await $.ui.mount({ ...BAND, surface: 'vscode' })
   const drawn = JSON.stringify(await ui.drawn())
   expect(drawn).toContain('"type":"Svg"')
-  expect(drawn).toContain('· 4 rows')
+  expect(drawn).toContain('· 7 rows')
   expect(drawn).not.toContain('"type":"Image"')
 })
 
@@ -248,12 +248,12 @@ test('/deck panel draws the expanded Deck in a pane, for VS Code', async ($, on)
   await $.command.run({ command: 'deck', args: 'collapse' })
   await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
   const out = await $.command.run({ command: 'deck', args: 'panel' })
-  expect(out.text).toBe('Deck opened in a panel.')
+  expect(out.text).toBe('Deck opened in a panel and will stay open (/deck panel off to stop).')
   const pane = await $.ui.mount({ ...PICKER, requestId: 'deck-panel', props: { ...PICKER.props, title: 'Deck' }, surface: 'vscode' })
   const drawn = JSON.stringify(await pane.drawn())
   expect(drawn).toContain('"type":"Svg"')
   // expanded even while the band is collapsed, every row at once
-  expect(drawn).toContain('· 4 rows')
+  expect(drawn).toContain('· 7 rows')
   expect(drawn).toContain('Weekly · 7d')
 })
 
@@ -266,7 +266,7 @@ test('/deck version names the running version', async ($, on) => {
 })
 
 test('the footer HUD button counts bars and toggles the HUD', async ($, on) => {
-  const { saved } = stubs(on)
+  const { saved } = stubs(on, new Map([['prefs', { always: false }]]))
   await start($)
   await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
   for (const surface of ['terminal', 'desktop'] as const) {
@@ -449,7 +449,7 @@ test('a usage update with one window keeps the other', async ($, on) => {
   await $.session.measure({ context: { tokens: 1, window: 10, percent: 10 }, rateLimits: [{ kind: 'seven_day', percentUsed: 50, resetsAt: inAnHour() }], changed: ['rateLimits'] })
   const out = await $.command.run({ command: 'deck', args: 'status' })
   expect(out.text).toMatch(/Session · 5h/)
-  expect(out.text).toMatch(/7d · 50% used/)
+  expect(out.text).toMatch(/Weekly · 7d — 50% used/)
 })
 
 test('bar titles use the typed words, not system reminders around them', async ($, on) => {
@@ -478,7 +478,7 @@ test('/deck collapsed text draws one plain status line with limits first', async
 })
 
 test('expanding unfolds the rows one after another, and the toggle folds them away', async ($, on) => {
-  const { clock } = stubs(on)
+  const { clock } = stubs(on, new Map([['prefs', { always: false }]]))
   await start($)
   await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
   await $.command.run({ command: 'deck', args: 'expand' })
@@ -497,7 +497,7 @@ test('expanding unfolds the rows one after another, and the toggle folds them aw
 })
 
 test('desktop rows fade in while they unfold', async ($, on) => {
-  const { clock } = stubs(on)
+  const { clock } = stubs(on, new Map([['prefs', { always: false }]]))
   await start($)
   await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
   await $.command.run({ command: 'deck', args: 'expand' })
@@ -532,7 +532,7 @@ test('spark: limit rows carry their history and a burn rate', async ($, on) => {
   await $.command.run({ command: 'deck', args: 'expand' })
   await clock.advance(1000)
   const term = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await term.find({ type: 'Text', text: /5h · 31% used/ })).toBeDefined()
+  expect(await term.find({ type: 'Text', text: /31% used/ })).toBeDefined()
   await term.unmount()
   const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
   expect(await desk.find({ key: 'row-limit:five_hour' })).toBeDefined()
@@ -546,12 +546,12 @@ test('/deck demo fills in a sample route and limits in a fresh session, and real
   expect(r.text).toMatch(/sample routing and limits/)
   let out = await $.command.run({ command: 'deck', args: 'status' })
   expect(out.text).toMatch(/⇄ Model route — /)
-  expect(out.text).toMatch(/Session · 5h — 5h · 31% used/)
-  expect(out.text).toMatch(/Weekly · 7d — 7d · 64% used/)
+  expect(out.text).toMatch(/Session · 5h — 31% used/)
+  expect(out.text).toMatch(/Weekly · 7d — 64% used/)
   await $.session.measure({ context: { tokens: 1, window: 10, percent: 10 }, rateLimits: [{ kind: 'seven_day', percentUsed: 50, resetsAt: inAnHour() }], changed: ['rateLimits'] })
   out = await $.command.run({ command: 'deck', args: 'status' })
   expect(out.text).not.toMatch(/Session · 5h/)
-  expect(out.text).toMatch(/7d · 50% used/)
+  expect(out.text).toMatch(/Weekly · 7d — 50% used/)
 })
 
 test('a background agent outlives its turn and moves to the Agents bar on the next prompt', async ($, on) => {
@@ -582,10 +582,10 @@ test('a narrow terminal drops the clock and cuts rows instead of wrapping them',
   await $.tool.call({ tool: 'TodoWrite', todos: TODOS })
   await $.command.run({ command: 'deck', args: 'expand' })
   const wide = await $.ui.mount({ ...BAND, surface: 'terminal' })
-  expect(await wide.find({ type: 'Text', text: /\d\d:\d\d/ })).toBeDefined()
+  expect(await wide.find({ type: 'Text', text: /(^|  ·  )\d\d:\d\d:\d\d$/ })).toBeDefined()
   await wide.unmount()
   const narrow = await $.ui.mount({ ...BAND, surface: 'terminal', viewport: { columns: 26, rows: 40 }, props: { ...BAND.props, bodyColumns: 26 } })
-  expect(await narrow.find({ type: 'Text', text: /\d\d:\d\d/ })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /(^|  ·  )\d\d:\d\d:\d\d$/ })).toBeUndefined()
   const rows = await narrow.findAll({ type: 'Box', props: { height: 1 } })
   expect(rows.length).toBeGreaterThan(0)
   for (const row of rows) {
@@ -675,7 +675,7 @@ test('a long folder is cut from the left, and a narrow terminal drops the clock 
   expect(text.length + 20).toBeLessThanOrEqual(cols)
   await ui.unmount()
   const narrow = await $.ui.mount({ ...BAND, surface: 'terminal', viewport: { columns: 40, rows: 40 }, props: { ...BAND.props, bodyColumns: 40 } })
-  expect(await narrow.find({ type: 'Text', text: /\d\d:\d\d/ })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /(^|  ·  )\d\d:\d\d:\d\d$/ })).toBeUndefined()
   expect(await narrow.find({ type: 'Text', text: /^…\/.*feat-x$/ })).toBeDefined()
 })
 
