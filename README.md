@@ -68,26 +68,34 @@ Mods need Claude Code 2.1.286 or later. To try it from a clone without installin
 | **Activity bar** | What Claude is doing right now (`Editing auth.ts · 14 tools · 1m 12s`) | Any turn without a todo list |
 | **Agent strips** | Each subagent's current tool, its model, elapsed time | Subagents, under the bar that started them |
 | **Context** | Tokens used out of the window | Your session |
-| **5h and 7d limits** | Percent used, a live countdown to each reset, and how fast you're burning it (`+12%/h`) | Your plan's rate limits, no `/usage` needed |
-| **Spend** (optional) | What you've spent today and this month | Your session cost, added up across sessions. Turn on with `/deck cost on`; it matters on a pay-per-use API key |
+| **5h and 7d limits** | Percent used, a live countdown to each reset, how fast you're burning it (`+12%/h`), and when you'd hit the limit at that pace (`⚠4:12pm`) | Your plan's rate limits, no `/usage` needed |
+| **Spend** | What this session has cost so far; with `/deck cost on` also today and this month, added up across sessions | Your session's cost ledger. Dollars are API-equivalent on a subscription |
+| **Tokens** | Tokens this session has used, split into in (with cache reads and writes) and out, added up across every response including subagents; `/deck tokens off` hides it | The engine's per-response usage |
+| **Session health** | The session's quality grade in words, its score out of 100 and the cache hit rate (`Excellent (S) · 91/100 · cache hit 91%`); below grade A it also names what is dragging the score down. S and A green, B green, C amber, D and F red. Shown only if the [token-optimizer](https://github.com/alexgreensh/token-optimizer) plugin is installed; `/deck optimizer off` hides it | The file token-optimizer writes for this session (`~/.claude/token-optimizer/quality-cache-<session>.json`). Deck only reads it. No plugin or no file yet: no row |
+| **Jev model switches** | How many times the Jev router switched your main chat's model versus kept it in this session (`3 switched · 2 kept`; `0 switched · 0 kept` at the start), with how long ago the newest one was. Shown only if [jev-model-router](#model-routing) is installed; `/deck switches off` hides it | The router's own saved switch log (`~/.claude/plugins/store/jev-model-router_*.json`), counting entries since this session started. Deck only reads it. The log has no session id, so two sessions running at the same time share it. No router: no row |
+| **Cache** | Time left before the prompt cache goes cold and what a cold re-write would cost; red with `⚠ 45s` in the last minute | The last request's time and the context size, priced at the model's cache-write rate |
 | **Model route** | Which model and effort a router picked, and how sure it was | [jev-model-router](#model-routing), if installed |
 | **Clock and weather** | Local time and the weather where you are | Open-Meteo, no key |
 | **Folder** | The folder the session works in (`~/Documents/deck`), in the expanded header; a long path is cut from the left | Your session |
+
+**Limit forecast.** When your usage is rising and, at that pace, a 5h or 7d limit would run out *before* it resets, the row says when: `hits ~4:12pm` (`hits ~Thu 4pm` on a later day). The bar turns amber, and red when it is under two hours away. The expanded rows show `⚠4:12pm` in place of the reset countdown; the collapsed chips and rings keep the reset and add the hit time. It uses the same recent history as the burn rate (at least five minutes of rising usage), so it shows nothing on a fresh session, when usage is flat, or when the limit resets first. It is an estimate: a burst of heavy work or a quiet hour moves it.
+
+**Cache warning.** In the last minute before the prompt cache goes cold, the Cache row turns red and counts down in seconds with the re-write cost (`⚠ 45s · rewrite ~$0.80`). Send any message to warm it again. With `/deck cache 5m` the warning comes after about four minutes of quiet.
 
 When something needs you (a permission prompt, a question, a reply ending in `?`), its row turns amber, a collapsed Deck opens by itself, and a soft alert plays. Steps tick, finished bars chime, and the last one plays a little fanfare.
 
 **Collapsed**, Deck is one line ordered by what matters: anything waiting on you, then your **5h and 7d limits**, context, the current task, and the route. Pick its look:
 
-- `/deck collapsed chips`: chips with mini bars (the default)
+- `/deck collapsed chips`: chips with mini bars (the default); the Session health row appears as a chip (`Excellent 91`) when there is room
 - `/deck collapsed text`: one plain status line, with the clock and weather at its end
-- `/deck collapsed rings`: a ring per limit with its reset time, plus spend: `◔ 14% 5h · resets 1h7m   ◕ 83% 7d · resets 3h47m   $ $0.10 today · $4.30 mo`
+- `/deck collapsed rings`: a ring per limit with its reset time, plus spend, the token total and the Session health grade: `◔ 14% 5h · resets 1h7m   ◕ 83% 7d · resets 3h47m   $ $0.10 today · $4.30 mo   T 1.2M tokens   S 91 Excellent`
 
 ## Styles
 
 Pick how the bars look with `/deck style`, a picker with live previews. Each app (Desktop and terminal) keeps its own choice.
 
 <p align="center">
-  <img src="assets/styles.svg" alt="Every Deck bar style (pixel, segments, line, solid, dots, spark) on Desktop and in the terminal, and the three collapsed looks: chips, text and rings." width="860">
+  <img src="assets/styles.svg" alt="Every Deck bar style (pixel, segments, line, solid, dots, spark) on Desktop and in the terminal, and the three collapsed looks: chips, text and rings, each with the token-optimizer grade." width="860">
 </p>
 
 | Style | CLI | Desktop |
@@ -112,9 +120,9 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck`, `0` in an empty prompt, or the **Deck** footer button | Collapse or expand |
 | `/deck style` | Style picker with live previews (keys 1–6) |
 | `/deck style <name>` | `segments`, `line`, `solid`, `dots`, `pixel`, `spark` |
-| `/deck <section> on\|off` | `plans agents context limits route pet clock weather folder all` |
+| `/deck <section> on\|off` | `plans agents context limits spend tokens optimizer switches cache route pet clock weather folder all` |
 | `/deck city <name>` | Weather city |
-| `/deck panel [off]` | Open Deck in a panel of its own, always expanded |
+| `/deck panel [off]` | Open Deck in a panel of its own, always expanded; it stays on, reopening each session and whenever it goes missing, until `off` |
 | `/deck version` | Show which Deck version is running |
 | `/deck size compact\|roomy` | Row spacing on Desktop (compact is the default) |
 | `/deck collapsed chips\|text\|rings` | Collapsed look: chips with mini bars, one plain line, or limit rings |

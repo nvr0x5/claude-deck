@@ -10,12 +10,15 @@ import { TERMINAL_STYLES, TERMINAL_STYLE_NAMES, terminalBar, terminalMini } from
 import { DESKTOP_STYLES, DESKTOP_STYLE_NAMES, desktopTrack, stripsSvg, stripsHeight } from './styles-desktop.js'
 import { createPet, stepPet, petX, petLaneSvg, petFrame, PET_RASTER } from './pet.js'
 
-const SECTIONS = ['plans', 'agents', 'context', 'limits', 'route', 'pet', 'clock', 'weather', 'folder']
+const SECTIONS = ['plans', 'agents', 'context', 'limits', 'spend', 'tokens', 'optimizer', 'switches', 'cache', 'route', 'pet', 'clock', 'weather', 'folder']
 
 const DEFAULT_PREFS = {
-  show: { plans: true, agents: true, context: true, limits: true, route: true, pet: true, clock: true, weather: false, folder: true },
+  show: { plans: true, agents: true, context: true, limits: true, spend: true, tokens: true, optimizer: true, switches: true, cache: true, route: true, pet: true, clock: true, weather: false, folder: true },
+  always: true, // start every session expanded, whatever the last one left behind
+  cacheTtl: '1h', // how long the prompt cache lives: '1h' (subscription) or '5m' (API key)
   style: { terminal: 'solid', desktop: 'pixel' },
   open: false,
+  panel: false, // keep Deck's panel open: reopen it each session and whenever it goes missing
   auto: true,
   sound: true,
   quiet: true,
@@ -34,9 +37,9 @@ const FOLD_MS = 5000
 const MAX_STRIPS = 4
 const ASK_DELAY_MS = 600
 const TRACK_H = 22
-const VERSION = '0.4.12' // keep in step with .claude-plugin/plugin.json (a test checks)
-const RIGHT_W = 92
 const HEADER_CH = 20 // the terminal header's toggle and row count, with their gaps
+const VERSION = '0.4.27' // keep in step with .claude-plugin/plugin.json (a test checks)
+const RIGHT_W = 92
 const TITLE_MAX_CH = 22 // a long prompt as a bar title would squeeze every track
 const TITLE_MAX_PX = 160
 const PET_COLS = 12
@@ -174,18 +177,54 @@ function series(key, windowMs, now) {
   return list.map((x) => x.p)
 }
 
-// how fast a window moves: percent per hour (or per day for the weekly window)
-function burnRate(key, now) {
+// percent per ms over the window, or null when the history can't say (too short, falling, too slow)
+function ratePerMs(key, now) {
   const daily = key.startsWith('seven_day')
   const list = (hist[key] ?? []).filter((x) => now - x.t <= (daily ? 24 : 1) * 3600_000)
-  if (list.length < 2) return ''
+  if (list.length < 2) return null
   const a = list[0]
   const b = list[list.length - 1]
   const span = b.t - a.t
-  if (span < 5 * 60_000 || b.p < a.p) return ''
-  const per = ((b.p - a.p) / span) * (daily ? 86_400_000 : 3_600_000)
-  if (per < 0.05) return ''
+  if (span < 5 * 60_000 || b.p < a.p) return null
+  const rate = (b.p - a.p) / span
+  // same floor as the display: 0.05 per hour, or per day for the weekly window
+  if (rate * (daily ? 86_400_000 : 3_600_000) < 0.05) return null
+  return rate
+}
+
+// how fast a window moves: percent per hour (or per day for the weekly window)
+function burnRate(key, now) {
+  const rate = ratePerMs(key, now)
+  if (rate == null) return ''
+  const daily = key.startsWith('seven_day')
+  const per = rate * (daily ? 86_400_000 : 3_600_000)
   return '+' + (per < 10 ? per.toFixed(1) : Math.round(per)) + (daily ? '%/day' : '%/h')
+}
+
+// when a limit will be reached at the current pace; null if it resets first or the pace is unknown
+function projectedHit(key, percentUsed, resetsAt, now) {
+  if (percentUsed == null || Number.isNaN(percentUsed) || percentUsed >= 100) return null
+  const rate = ratePerMs(key, now)
+  if (rate == null) return null
+  const minutesLeft = (100 - percentUsed) / rate / 60_000
+  const hitAt = now + minutesLeft * 60_000
+  // a reset at or before the hit means the limit is never reached
+  const reset = resetsAt ? Date.parse(resetsAt) : NaN
+  if (!Number.isNaN(reset) && reset <= hitAt) return null
+  return { hitAt, minutesLeft }
+}
+
+// "4:12pm" for today, "Thu 4pm" (minutes only if not on the hour) for a later day; 12-hour, local time
+function hitClock(ms, now) {
+  const d = new Date(ms)
+  const h = d.getHours()
+  const min = d.getMinutes()
+  const hour12 = h % 12 || 12
+  const ampm = h < 12 ? 'am' : 'pm'
+  const sameDay = d.toDateString() === new Date(now).toDateString()
+  if (sameDay) return hour12 + ':' + String(min).padStart(2, '0') + ampm
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()]
+  return day + ' ' + hour12 + (min ? ':' + String(min).padStart(2, '0') : '') + ampm
 }
 
 // spend: this session's running total, added into today and this month across sessions
@@ -197,6 +236,38 @@ const today = () => {
   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
 }
 const fmtUsd = (v) => '$' + (v < 100 ? v.toFixed(2) : Math.round(v))
+
+// this session's cost so far, whatever /deck cost says (that one adds sessions up into days and months)
+let sessionUsd = null
+
+// the prompt cache: when the main thread last sent a request, and what a cold one would re-write.
+// $ per million tokens of cache write (1h), list prices; longer family names first.
+const CACHE_WRITE = [
+  ['fable-5-1', 20],
+  ['fable-5', 20],
+  ['opus-5', 10],
+  ['opus-4', 10],
+  ['sonnet-5', 4],
+  ['sonnet', 6],
+  ['haiku', 2],
+]
+const CACHE_TTL_MS = { '1h': 3600_000, '5m': 300_000 }
+const CACHE_WARN_MS = 60_000 // under this the cache is about to lapse
+let cacheAt = 0 // ms of the main thread's last request; 0 before the first
+
+function cacheWriteRate(model) {
+  const m = String(model ?? '').toLowerCase().replace(/[\s.]+/g, '-')
+  for (const [family, rate] of CACHE_WRITE) if (m.includes(family)) return rate
+  return null
+}
+
+// "47:12" under an hour, "1:05:00" over, "0:00" once gone
+function clockLeft(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000))
+  const h = Math.floor(s / 3600)
+  const m = Math.floor((s % 3600) / 60)
+  return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s % 60).padStart(2, '0')
+}
 
 // open and close unfold row by row instead of jumping
 let fold = null // { dir: 'open' | 'close', start, timer }
@@ -556,7 +627,7 @@ function readRouteStatus(text) {
   const m = String(text).match(/^jev · (\w+) ([\d.]+|n\/d)(?: → (\S+)| · unchanged)?/)
   if (!m) return false
   dropDemoRoute()
-  const r = { tier: m[1], conf: m[2] === 'n/d' ? null : Number(m[2]), model: '', effort: '', unchanged: !m[3], at: Date.now() }
+  const r = { tier: m[1], conf: m[2] === 'n/d' ? null : Number(m[2]), model: '', effort: '', unchanged: !m[3], unsure: /· unsure\b/.test(String(text)), at: Date.now() }
   for (const part of String(m[3] ?? '').split('/').filter(Boolean)) {
     if (EFFORTS.includes(part)) r.effort = part
     else r.model = shortModel(part)
@@ -598,9 +669,35 @@ function readRouteLog(text) {
   return true
 }
 
+// Whether the model switch behind the current route re-sent the conversation, from the router's
+// newest switch-log entry. The router stamps it with what the API reported writing to the new
+// model's cache; until then its own estimate shows, marked with ~. Returns { short, long } or null.
+// short fits the 12-column right-hand cell: "↻108k", "↻~108k", "warm", "held 184k".
+function cacheMark(rec, r) {
+  if (!rec || !r || !r.at || typeof rec.at !== 'number') return null
+  if (rec.at < r.at - 1000 || rec.at - r.at > 120_000) return null
+  const k = (n) => Math.round(n / 1000) + 'k'
+  const num = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0
+  if (rec.allowed === false) {
+    const size = num(rec.context) ? ' ' + k(rec.context) : ''
+    return { short: 'held' + size, long: 'held, kept the warm model' + (size ? ', would have re-sent ' + k(rec.context) : '') }
+  }
+  if (rec.allowed !== true) return null
+  if (num(rec.written) && num(rec.read)) {
+    const resent = rec.written >= 5000 && rec.written >= (rec.written + rec.read) * 0.5
+    return resent ? { short: '↻' + k(rec.written), long: 're-sent ' + k(rec.written) + ' tokens (measured)' } : { short: 'warm', long: 'cache warm (measured)' }
+  }
+  if (rec.cold === true) {
+    const size = num(rec.context) ? k(rec.context) : ''
+    return { short: '↻~' + size, long: 'likely re-sent' + (size ? ' ' + size : '') + ' (estimated)' }
+  }
+  if (rec.cold === false) return { short: '~warm', long: 'cache likely warm (estimated)' }
+  return null
+}
+
 function routeRow() {
   if (!prefs.show.route || !route) return null
-  const from = shortModel(sessionModel || seen.model) || 'session'
+  const from = shortModel(seen.model || sessionModel) || 'session'
   if (route.noAnswer) {
     return {
       id: 'route',
@@ -622,7 +719,8 @@ function routeRow() {
     }
   }
   if (!route.tier) return null
-  const want = TIER_MODEL[route.tier] ?? route.tier
+  // an unsure turn is forced to the deep tier whatever tier Jev named, so that is what was wanted
+  const want = route.unsure ? (TIER_MODEL.deep ?? 'opus') : (TIER_MODEL[route.tier] ?? route.tier)
   const to = route.model || from
   const effort = route.effort || seen.effort || ''
   const toRank = MODEL_RANK[to]
@@ -630,6 +728,7 @@ function routeRow() {
   // only a model the router actually switched to counts as cheaper or deeper
   const dir = !route.model ? '=' : toRank != null && fromRank != null ? (toRank < fromRank ? '↓' : toRank > fromRank ? '↑' : '=') : '='
   const unapplied = want !== to
+  const mark = cacheMark(switches?.latest, route)
   return {
     id: 'route',
     kind: 'route',
@@ -643,9 +742,11 @@ function routeRow() {
     risky: route.risky ?? null,
     ms: route.ms ?? null,
     tier: route.tier,
+    unsure: !!route.unsure,
     unapplied,
     dir,
-    right: dir === '↓' ? '↓ cheaper' : dir === '↑' ? '↑ deeper' : '= kept',
+    right: mark ? dir + ' ' + mark.short : dir === '↓' ? '↓ cheaper' : dir === '↑' ? '↑ deeper' : '= kept',
+    cache: mark ? mark.long : '',
     short: '⇄ ' + to + (effort ? '·' + effort : ''),
     pct: 0,
     marks: [],
@@ -731,6 +832,10 @@ function collectRows(now) {
   const rows = []
   const rr = routeRow()
   if (rr) rows.push(rr)
+  if (prefs.show.switches) {
+    const sw = switchesRow(now)
+    if (sw) rows.push(sw)
+  }
   for (const bar of bars.values()) {
     if (bar.dismissed) continue
     if (bar.id === 'agents' ? !prefs.show.agents : !prefs.show.plans) continue
@@ -743,8 +848,9 @@ function collectRows(now) {
   const act = activityRow(now)
   if (act) rows.push(act)
   const ctx = usage.context
-  if (prefs.show.context && ctx && ctx.percent != null) {
-    const p = ctx.percent
+  // a fresh session has a window but no response yet: show it empty rather than leave the row out
+  if (prefs.show.context && ctx && (ctx.percent != null || ctx.window)) {
+    const p = ctx.percent ?? 0
     rows.push({
       id: 'context',
       kind: 'meter',
@@ -752,7 +858,7 @@ function collectRows(now) {
       title: 'Context',
       pct: p,
       marks: [{ f: 0.5 }, { f: 0.8 }],
-      name: fmtK(ctx.tokens) + ' / ' + fmtK(ctx.window),
+      name: fmtK(ctx.tokens ?? 0) + ' / ' + fmtK(ctx.window),
       count: '',
       right: Math.round(p) + '%',
       short: 'ctx ' + Math.round(p) + '%',
@@ -765,27 +871,254 @@ function collectRows(now) {
     for (const rl of usage.rateLimits ?? []) {
       const [title, tag] = limitName(rl.kind)
       const p = rl.percentUsed
+      let style = p >= 80 ? 'hot' : p >= 50 ? 'warn' : 'ok'
+      // when the pace reaches the limit before the reset, say when; the bar warns, and goes hot inside two hours
+      const hit = projectedHit(rl.kind, p, rl.resetsAt, now)
+      const at = hit ? hitClock(hit.hitAt, now) : ''
+      if (hit && style !== 'hot') style = hit.minutesLeft < 120 ? 'hot' : 'warn'
       rows.push({
         id: 'limit:' + rl.kind,
         kind: 'meter',
         limit: true,
-        style: p >= 80 ? 'hot' : p >= 50 ? 'warn' : 'ok',
+        style,
         title,
         pct: Math.min(100, p),
         marks: [{ f: 0.25 }, { f: 0.5 }, { f: 0.75 }],
-        name: tag + ' · ' + Math.round(p) + '% used',
+        name: Math.round(p) + '% used' + (hit ? ' · hits ~' + at : ''),
         count: '',
-        right: rl.resetsAt ? '↻ ' + countdown(rl.resetsAt) : '',
-        short: tag + ' ' + Math.round(p) + '%' + (rl.resetsAt ? ' ↻' + humanReset(rl.resetsAt) : ''),
+        // a limit that will be hit before it resets shows when, in place of the reset (the chips keep both)
+        right: hit ? '⚠' + at : rl.resetsAt ? '↻ ' + countdown(rl.resetsAt) : '',
+        short: tag + ' ' + Math.round(p) + '%' + (rl.resetsAt ? ' ↻' + humanReset(rl.resetsAt) : '') + (hit ? ' ⚠' + at : ''),
         section: 'limits',
         kindKey: rl.kind,
         resets: rl.resetsAt ? humanReset(rl.resetsAt) : '',
+        ...(hit ? { hitAt: at } : {}),
         hist: series(rl.kind, rl.kind.startsWith('seven_day') ? 24 * 3600_000 : 3600_000, now),
         rate: burnRate(rl.kind, now),
       })
     }
   }
+  if (prefs.show.spend) rows.push(spendRow())
+  if (prefs.show.tokens) rows.push(tokensRow())
+  if (prefs.show.optimizer) {
+    const o = optimizerRow(now)
+    if (o) rows.push(o)
+  }
+  if (prefs.show.cache) rows.push(cacheRow(now))
   return rows
+}
+
+// what this session has cost so far; the bar stays empty, the figure is the point
+function spendRow() {
+  const usd = sessionUsd ?? 0
+  const today = prefs.cost && spend.day ? fmtUsd(spend.dayUsd) + ' today' : ''
+  return {
+    id: 'spend',
+    kind: 'meter',
+    style: 'done',
+    title: 'Spend',
+    pct: 0,
+    marks: [],
+    name: fmtUsd(usd) + ' this session',
+    count: '',
+    right: today,
+    short: fmtUsd(usd),
+    section: 'spend',
+    hist: [],
+    rate: '',
+  }
+}
+
+// tokens this session has used, summed from every response (subagents included) since the session began
+let tokensUsed = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+function tokensRow() {
+  const t = tokensUsed
+  const total = t.input + t.output + t.cacheRead + t.cacheWrite
+  return {
+    id: 'tokens',
+    kind: 'meter',
+    style: 'done',
+    title: 'Tokens',
+    pct: 0,
+    marks: [],
+    name: '↓' + fmtK(t.input + t.cacheRead + t.cacheWrite) + ' in · ↑' + fmtK(t.output) + ' out',
+    count: '',
+    right: fmtK(total),
+    short: fmtK(total) + ' tok',
+    section: 'tokens',
+    hist: [],
+    rate: '',
+  }
+}
+
+// the token-optimizer plugin's own quality score for this session, read from the file it writes.
+// Soft dependency: no plugin, no file, or an unreadable one means no row, never an error.
+const OPT_STALE_MS = 10 * 60_000
+let optimizer = null
+async function refreshOptimizer($) {
+  try {
+    const home = await $.env.get('HOME')
+    if (!home || !sessionId || !/^[0-9a-f-]{8,64}$/i.test(sessionId)) {
+      optimizer = null
+      return
+    }
+    const d = JSON.parse(await $.fs.read(home + '/.claude/token-optimizer/quality-cache-' + sessionId + '.json'))
+    const score = Number(d.score)
+    const grade = typeof d.grade === 'string' ? d.grade.toUpperCase() : ''
+    if (!Number.isFinite(score) || !'SABCDF'.includes(grade) || grade.length !== 1) throw new Error('unexpected shape')
+    const at = Date.parse(d.timestamp)
+    optimizer = {
+      score,
+      grade,
+      at: Number.isFinite(at) ? at : 0,
+      drag: typeof d.top_drag?.label === 'string' ? d.top_drag.label : '',
+      hit: typeof d.cache_hit_rate === 'number' ? d.cache_hit_rate : null,
+    }
+  } catch {
+    optimizer = null
+  }
+}
+
+// how often the Jev router switched the main chat's model versus kept it in this session, from the
+// router's switch-log (entries stamped since the session started; the log has no session id, so two
+// sessions running at once share it). Soft dependency like the Optimizer row: no router or no store
+// file means no row. Only the router's own saved file is read.
+let sessionStartedAt = Date.now()
+let switches = null
+async function refreshSwitches($) {
+  try {
+    const home = await $.env.get('HOME')
+    if (!home) throw new Error('no home')
+    const dir = home + '/.claude/plugins/store'
+    const files = (await $.fs.list(dir))
+      .filter((f) => f.kind === 'file' && f.name.startsWith('jev-model-router_') && f.name.endsWith('.json'))
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    if (!files.length) throw new Error('router not installed')
+    const saved = JSON.parse(await $.fs.read(dir + '/' + files[0].name))
+    if (!saved || typeof saved !== 'object') throw new Error('unexpected shape')
+    // a router that has not judged a switch yet has no log; that is zero, not absent
+    const log = saved['switch-log'] ?? []
+    if (!Array.isArray(log)) throw new Error('unexpected shape')
+    let switched = 0
+    let kept = 0
+    let newest = 0
+    let latest = null
+    for (const r of log) {
+      if (typeof r?.at !== 'number' || r.at < sessionStartedAt) continue
+      if (r?.allowed === true) switched++
+      else if (r?.allowed === false) kept++
+      else continue
+      if (typeof r.at === 'number' && r.at > newest) {
+        newest = r.at
+        latest = r
+      }
+    }
+    switches = { switched, kept, newest, latest }
+  } catch {
+    switches = null
+  }
+}
+
+function switchesRow(now) {
+  const w = switches
+  if (!w) return null
+  const total = w.switched + w.kept
+  const age = w.newest ? Math.max(0, now - w.newest) : 0
+  const ago = !w.newest ? '' : age < 3600_000 ? Math.max(1, Math.round(age / 60_000)) + 'm' : age < 86_400_000 ? Math.round(age / 3600_000) + 'h' : Math.round(age / 86_400_000) + 'd'
+  return {
+    id: 'switches',
+    kind: 'meter',
+    style: 'run',
+    title: 'Jev model switches',
+    pct: total ? (w.switched / total) * 100 : 0,
+    marks: [],
+    name: w.switched + ' switched · ' + w.kept + ' kept',
+    count: '',
+    right: ago ? ago + ' ago' : 'this session',
+    short: 'sw ' + w.switched + '/' + w.kept,
+    section: 'switches',
+    hist: [],
+    rate: '',
+  }
+}
+
+// S and A are green, B green too but flagged as a watch, C amber, D and F red
+const OPT_STYLE = { S: 'done', A: 'done', B: 'ok', C: 'warn', D: 'hot', F: 'hot' }
+// the grade in plain words, so the letter alone doesn't have to be decoded
+const OPT_WORD = { S: 'Excellent', A: 'Great', B: 'Good', C: 'Fair', D: 'Poor', F: 'Critical' }
+function optimizerRow(now) {
+  const o = optimizer
+  if (!o) return null
+  const age = o.at ? now - o.at : 0
+  const stale = age > OPT_STALE_MS
+  const lowish = 'BCDF'.includes(o.grade)
+  const word = OPT_WORD[o.grade] ?? 'Grade'
+  const name = word + ' (' + o.grade + ') · ' + Math.round(o.score) + '/100' + (o.hit != null ? ' · cache hit ' + Math.round(o.hit * 100) + '%' : '')
+  return {
+    id: 'optimizer',
+    kind: 'meter',
+    style: stale ? 'run' : OPT_STYLE[o.grade],
+    title: 'Session health',
+    pct: o.score,
+    marks: [],
+    name,
+    count: '',
+    // the right column is about 12 characters wide, so a long reason is cut
+    right: stale ? 'stale ' + (age < 3600_000 ? Math.round(age / 60_000) + 'm' : Math.round(age / 3600_000) + 'h') : lowish && o.drag ? trunc(o.drag, 12) : '',
+    short: word + ' ' + Math.round(o.score),
+    section: 'optimizer',
+    grade: o.grade,
+    word,
+    score: Math.round(o.score),
+    hist: [],
+    rate: '',
+  }
+}
+
+// how long the prompt cache stays warm, and what the next send re-writes if it has gone cold
+function cacheRow(now) {
+  const ttl = CACHE_TTL_MS[prefs.cacheTtl] ?? CACHE_TTL_MS['1h']
+  const tokens = usage.context?.tokens ?? 0
+  const rate = cacheWriteRate(seen.model || sessionModel)
+  const rewrite = rate != null && tokens > 0 ? '~' + fmtUsd((tokens * rate) / 1e6) : ''
+  const base = { id: 'cache', kind: 'meter', marks: [{ f: 0.33 }, { f: 0.66 }], count: '', section: 'cache', hist: [], rate: '' }
+  if (!cacheAt || !tokens) {
+    return { ...base, style: 'run', title: 'Cache', pct: 0, name: 'nothing cached yet', right: '', short: 'cache ·' }
+  }
+  const left = cacheAt + ttl - now
+  const tag = prefs.cacheTtl === '5m' ? '5m' : '1h'
+  if (left <= 0) {
+    return { ...base, style: 'hot', title: 'Cache', pct: 0, name: 'cold · rewrite ' + (rewrite || '?'), right: tag + ' lapsed', short: 'cache cold' + (rewrite ? ' ' + rewrite : '') }
+  }
+  const p = (left / ttl) * 100
+  if (left < CACHE_WARN_MS) {
+    // last minute: shout, but keep draining so the bar still shows the time
+    return {
+      ...base,
+      style: 'hot',
+      title: 'Cache',
+      pct: p,
+      // short on purpose: the bar's label has about 25 cells, and the cost is the part that got clipped
+      name: '⚠ ' + Math.ceil(left / 1000) + 's · rewrite ' + (rewrite || '?'),
+      right: '⏱ ' + clockLeft(left),
+      short: 'cache ⚠' + humanLeft(left) + (rewrite ? ' ' + rewrite : ''),
+    }
+  }
+  return {
+    ...base,
+    style: p >= 33 ? 'ok' : p >= 10 ? 'warn' : 'hot',
+    title: 'Cache',
+    pct: p,
+    name: 'warm · rewrite ' + (rewrite || '?'),
+    right: '⏱ ' + clockLeft(left),
+    short: 'cache ' + humanLeft(left) + (rewrite ? ' ' + rewrite : ''),
+  }
+}
+
+// "47m", "3m", "40s": the collapsed chips, where seconds would only flicker until the last minute
+function humanLeft(ms) {
+  const s = Math.floor(ms / 1000)
+  return s >= 60 ? Math.ceil(s / 60) + 'm' : s + 's'
 }
 
 // collapsed: what needs you first, then limits, context, bars, the route
@@ -828,6 +1161,7 @@ function routeCellsTerminal(row) {
     push('·'.repeat(Math.max(0, 4 - lvl)) + ' ' + row.effort, DIM)
   }
   if (row.conf != null) push('  conf ' + row.conf.toFixed(2), row.conf >= 0.6 ? STYLE.ok.fill : STYLE.warn.fill)
+  if (row.unsure) push('  ? unsure → ' + row.want, STYLE.warn.fill)
   if (row.risky != null && row.risky > 0.7) push('  ⚠ risky', STYLE.hot.fill)
   if (row.ms != null) push('  ' + row.ms + 'ms', DIM)
   push('  ', MUTED)
@@ -894,7 +1228,9 @@ function routeSvg(row, W) {
     out += `<text x="${x}" y="15" style="font:400 12px ${F};fill:#c9c7c1">${esc(row.effort)}</text>`
     x += textWidth(row.effort, 6.4) + 14
   }
-  if (row.conf != null) {
+  // every item below is optional: one that would run past the track into the right-hand cell is dropped
+  const room = (need) => x + need <= W
+  if (row.conf != null && room(124)) {
     const c = row.conf >= 0.6 ? STYLE.ok.desk : STYLE.warn.desk
     out += `<text x="${x}" y="15" style="font:400 11.5px ${F};fill:#77756f">conf</text>`
     x += 30
@@ -903,11 +1239,20 @@ function routeSvg(row, W) {
     out += `<text x="${x}" y="15" style="font:400 11.5px ${F};fill:#9a9893">${row.conf.toFixed(2)}</text>`
     x += 40
   }
-  if (row.risky != null && row.risky > 0.7) {
+  const label = 'unsure → ' + row.want
+  const unsureW = textWidth(label, 6.4) + 14
+  if (row.unsure && room(unsureW)) {
+    const w = unsureW
+    out += `<rect x="${x}" y="3" width="${w}" height="16" rx="8" fill="${STYLE.warn.desk}" fill-opacity=".18" stroke="${STYLE.warn.desk}" stroke-opacity=".7"/>`
+    out += `<text x="${x + 7}" y="15" style="font:500 11px ${F};fill:${STYLE.warn.desk}">${esc(label)}</text>`
+    x += w + 8
+  }
+  if (row.risky != null && row.risky > 0.7 && room(56)) {
     out += `<text x="${x}" y="15" style="font:500 11.5px ${F};fill:${STYLE.hot.desk}">⚠ risky</text>`
     x += 56
   }
-  if (row.unapplied) {
+  // an unsure pill or a held/re-sent mark already says why the wanted model did not run
+  if (row.unapplied && !row.unsure && !row.cache && room(72)) {
     out += `<text x="${x}" y="15" style="font:400 11.5px ${F};fill:#77756f">not applied</text>`
     x += 72
   }
@@ -928,7 +1273,11 @@ function ringSvg(pct, color, icon) {
   const glyph =
     icon === 'usd'
       ? `<text x="11" y="15" text-anchor="middle" style="font:600 10px ui-sans-serif,system-ui,sans-serif;fill:${color}">$</text>`
-      : icon === 'week'
+      : icon === 'tok'
+        ? `<text x="11" y="14.5" text-anchor="middle" style="font:600 8px ui-sans-serif,system-ui,sans-serif;fill:${color}">T</text>`
+        : icon && icon.startsWith('g:')
+          ? `<text x="11" y="14.5" text-anchor="middle" style="font:700 9px ui-sans-serif,system-ui,sans-serif;fill:${color}">${icon.slice(2)}</text>`
+          : icon === 'week'
         ? `<rect x="7.2" y="7.6" width="7.6" height="7" rx="1.2" fill="none" stroke="${color}" stroke-width="1.3"/><rect x="7.2" y="7.6" width="7.6" height="2" fill="${color}"/>`
         : `<path d="M11 7.2V11l2.4 1.6" fill="none" stroke="${color}" stroke-width="1.4" stroke-linecap="round"/>`
   return (
@@ -1007,6 +1356,14 @@ function setOpen($, want) {
   $.ui.invalidate('ui.render')
 }
 
+// the pane is the engine's, and it can go missing (a new session, a narrow window): reopen it
+async function ensurePanel($) {
+  try {
+    const up = (await $.ui.panes()).some((p) => p.id === 'deck-panel' && p.isPlaced)
+    if (!up) await $.ui.open({ id: 'deck-panel', title: 'Deck' })
+  } catch {}
+}
+
 async function savePrefs($) {
   await $.store.set('prefs', prefs)
 }
@@ -1030,7 +1387,10 @@ async function refreshUsage($) {
     const u = await $.session.usage()
     if (demoUsage && ((u.rateLimits ?? []).length || u.context?.percent != null)) dropDemoUsage()
     usage = { context: u.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, u.rateLimits) }
-    if (u.cost) await addSpend($, u.cost.usd)
+    if (u.cost) {
+      sessionUsd = u.cost.usd
+      await addSpend($, u.cost.usd)
+    }
     await noteUsage($)
   } catch {}
 }
@@ -1150,7 +1510,7 @@ function statusText() {
       continue
     }
     if (r.kind === 'route') {
-      lines.push('⇄ Model route — ' + r.from + ' ' + (r.dir === '=' ? '=' : '→') + ' ' + r.to + (r.effort ? ' · effort ' + r.effort : '') + ' · jev ' + r.tier + (r.conf != null ? ' ' + r.conf.toFixed(2) : '') + (r.unapplied ? ', suggested ' + r.want + ', not applied' : '') + ' (' + r.right + ')')
+      lines.push('⇄ Model route — ' + r.from + ' ' + (r.dir === '=' ? '=' : '→') + ' ' + r.to + (r.effort ? ' · effort ' + r.effort : '') + ' · jev ' + r.tier + (r.conf != null ? ' ' + r.conf.toFixed(2) : '') + (r.unsure ? ', unsure → ' + r.want : '') + (r.unapplied ? ', suggested ' + r.want + ', not applied' : '') + ' (' + (r.dir === '↓' ? 'cheaper' : r.dir === '↑' ? 'deeper' : 'kept') + (r.cache ? ' · ' + r.cache : '') + ')')
       continue
     }
     lines.push(STYLE[r.style].glyph + ' ' + r.title + ' — ' + r.name + (r.count ? ' ' + r.count : '') + (r.right ? ' (' + r.right + ')' : ''))
@@ -1180,6 +1540,8 @@ const HELP = [
   '/deck size compact|roomy   compact (default) packs the rows tighter on Desktop',
   '/deck collapsed chips|text|rings  collapsed look: chips with mini bars, one plain line, or limit rings',
   '/deck cost on|off         track spend today and this month (pay-per-use API keys)',
+  '/deck always on|off        open expanded in every new session (default on)',
+  '/deck cache 1h|5m          how long your prompt cache lives, for the Cache row (1h on a subscription, 5m on an API key)',
   '/deck auto on|off          expand when something needs you',
   '/deck sound on|off',
   '/deck demo                 play a sample plan with agents',
@@ -1210,9 +1572,6 @@ async function deckView($, e, next) {
   const { Box, Text, Button, Svg, Image } = $.ui.resolve(e)
   const desktop = e.surface !== 'terminal' // desktop, VS Code and mobile all draw Svg
   if (e.surface === 'terminal') sawTerminal = true
-  // TEXT/MUTED/DIM/TRACK are tuned for a dark background and vanish on a light desktop theme;
-  // there, plain text takes the theme's foreground and grey text uses dimColor instead
-  const tone = (c) => (!desktop ? { color: c } : c === TEXT || c === '#c9c7c1' ? {} : c === MUTED || c === DIM || c === TRACK ? { dimColor: true } : { color: c })
   const nowMs = Date.now()
   // the real width, even a narrow side-by-side pane: a floor wider than the band wraps every row
   // (https://github.com/nvr0x5/claude-deck/issues/4)
@@ -1225,10 +1584,6 @@ async function deckView($, e, next) {
   // a narrow terminal drops the weather, then the clock, before the header line would wrap
   if (!desktop) while (extras.length && HEADER_CH + extras.join('  ·  ').length > cols) extras.pop()
   if (!rows.length && !extras.length && !prefs.show.pet) return next(e)
-  // a mod after deck in the hook chain also wants to draw AbovePrompt; stack its band under ours
-  // instead of swallowing it (https://github.com/nvr0x5/claude-deck/issues/2)
-  const below = await next(e)
-  const stack = (tree) => (below ? Box({ flexDirection: 'column', children: [tree, below] }) : tree)
 
   // the pet's lane
   const lane = []
@@ -1265,10 +1620,10 @@ async function deckView($, e, next) {
     dimColor: true,
     onPress: () => setOpen($, !isOpening()),
   })
-  const extrasText = Box({ flexShrink: 0, children: [Text({ ...tone(MUTED), children: [extras.join('  ·  ')] })] })
+  const extrasText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [extras.join('  ·  ')] })] })
   const spacer = Box({ flexGrow: 1, children: [] })
 
-  // ----- collapsed, rings: a ring per limit, its reset, and spend -----
+  // ----- collapsed, rings: a ring per limit, its reset, spend, tokens and the optimizer grade -----
   if ((!open || !rows.length) && prefs.collapsed === 'rings') {
     const items = []
     const ask = rows.find((r) => r.state === 'needs_input')
@@ -1285,7 +1640,7 @@ async function deckView($, e, next) {
           flexShrink: 0,
           columnGap: 1,
           alignItems: 'center',
-          children: [ring, Text({ ...tone(TEXT), bold: true, wrap: 'truncate', children: [Math.round(row.pct) + '%'] }), Text({ ...tone(MUTED), wrap: 'truncate', children: [tag + (row.resets ? ' · resets ' + row.resets : '')] })],
+          children: [ring, Text({ color: TEXT, bold: true, wrap: 'truncate', children: [Math.round(row.pct) + '%'] }), Text({ color: MUTED, wrap: 'truncate', children: [tag + (row.resets ? ' · resets ' + row.resets : '') + (row.hitAt ? ' · hits ~' + row.hitAt : '')] })],
         }),
       )
     }
@@ -1299,13 +1654,46 @@ async function deckView($, e, next) {
           children: [
             desktop ? Svg({ alt: 'spend', width: 22, height: 22, source: ringSvg(100, STYLE.done.desk, 'usd') }) : Text({ color: STYLE.done.fill, children: ['$'] }),
             Text({ color: STYLE.done.fill, bold: true, wrap: 'truncate', children: [fmtUsd(spend.dayUsd)] }),
-            Text({ ...tone(MUTED), wrap: 'truncate', children: ['today · ' + fmtUsd(spend.monthUsd) + ' this month'] }),
+            Text({ color: MUTED, wrap: 'truncate', children: ['today · ' + fmtUsd(spend.monthUsd) + ' this month'] }),
+          ],
+        }),
+      )
+    }
+    const tok = rows.find((r) => r.id === 'tokens')
+    if (tok) {
+      items.push(
+        Box({
+          flexDirection: 'row',
+          flexShrink: 0,
+          columnGap: 1,
+          alignItems: 'center',
+          children: [
+            desktop ? Svg({ alt: 'tokens', width: 22, height: 22, source: ringSvg(100, STYLE.done.desk, 'tok') }) : Text({ color: STYLE.done.fill, children: ['T'] }),
+            Text({ color: STYLE.done.fill, bold: true, wrap: 'truncate', children: [tok.right] }),
+            Text({ color: MUTED, wrap: 'truncate', children: ['tokens'] }),
+          ],
+        }),
+      )
+    }
+    const opt = rows.find((r) => r.id === 'optimizer')
+    if (opt) {
+      const st = STYLE[opt.style]
+      items.push(
+        Box({
+          flexDirection: 'row',
+          flexShrink: 0,
+          columnGap: 1,
+          alignItems: 'center',
+          children: [
+            desktop ? Svg({ alt: 'session health ' + opt.word + ' ' + opt.grade, width: 22, height: 22, source: ringSvg(opt.score, st.desk, 'g:' + opt.grade) }) : Text({ color: st.fill, children: [opt.grade] }),
+            Text({ color: st.fill, bold: true, wrap: 'truncate', children: [String(opt.score)] }),
+            Text({ color: MUTED, wrap: 'truncate', children: [opt.word] }),
           ],
         }),
       )
     }
     const busy = rows.find((r) => (r.kind === 'bar' || r.kind === 'activity') && r.animating && r.state !== 'needs_input')
-    if (busy) items.push(Box({ flexShrink: 1, children: [Text({ ...tone(MUTED), wrap: 'truncate', children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] })] }))
+    if (busy) items.push(Box({ flexShrink: 1, children: [Text({ color: MUTED, wrap: 'truncate', children: [STYLE[busy.style].glyph + ' ' + trunc(busy.short, 22)] })] }))
     const line = Box({
       flexDirection: 'row',
       columnGap: 2,
@@ -1317,7 +1705,7 @@ async function deckView($, e, next) {
         extrasText,
       ],
     })
-    return stack(Box({ flexDirection: 'column', children: [...lane, line] }))
+    return Box({ flexDirection: 'column', children: [...lane, line] })
   }
 
   // ----- collapsed, text: one plain status line, clock and weather at its end -----
@@ -1328,19 +1716,19 @@ async function deckView($, e, next) {
       if (parts.length) parts.push(Text({ children: ['  '] }))
       if (row.kind === 'route') {
         parts.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: ['⇄ '] }))
-        parts.push(Text({ ...tone(MUTED), children: [row.to + (row.effort ? ' · ' + row.effort : '')] }))
+        parts.push(Text({ color: MUTED, children: [row.to + (row.effort ? ' · ' + row.effort : '')] }))
         continue
       }
       parts.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
-      parts.push(Text({ ...tone(row.state === 'needs_input' ? st.fill : MUTED), children: [row.short] }))
+      parts.push(Text({ color: row.state === 'needs_input' ? st.fill : MUTED, children: [row.short] }))
     }
-    if (extras.length) parts.push(Text({ ...tone(MUTED), children: [(parts.length ? '  ' : '') + [...extras].reverse().join('  ')] }))
+    if (extras.length) parts.push(Text({ color: MUTED, children: [(parts.length ? '  ' : '') + [...extras].reverse().join('  ')] }))
     const line = Box({
       flexDirection: 'row',
       columnGap: 1,
       children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', flexShrink: 1, children: [Text({ wrap: 'truncate', children: parts })] })],
     })
-    return stack(Box({ flexDirection: 'column', children: [...lane, line] }))
+    return Box({ flexDirection: 'column', children: [...lane, line] })
   }
 
   // ----- collapsed, chips: one line of chips, limits first -----
@@ -1357,13 +1745,13 @@ async function deckView($, e, next) {
         continue
       }
       budget -= w
-      if (chips.length) chips.push(Text({ ...tone(TRACK), children: [' │ '] }))
+      if (chips.length) chips.push(Text({ color: TRACK, children: [' │ '] }))
       if (row.kind === 'route') {
         chips.push(Text({ color: desktop ? STYLE.run.desk : STYLE.run.fill, children: [row.short + ' '] }))
         continue
       }
       chips.push(Text({ color: desktop ? st.desk : st.fill, children: [st.glyph + ' '] }))
-      const chipText = { ...tone(row.state === 'needs_input' ? st.fill : row.limit ? TEXT : '#c9c7c1'), children: [row.short + ' '] }
+      const chipText = { color: row.state === 'needs_input' ? st.fill : row.limit ? TEXT : '#c9c7c1', children: [row.short + ' '] }
       if (row.limit) chipText.bold = true
       chips.push(Text(chipText))
       chips.push(
@@ -1377,14 +1765,14 @@ async function deckView($, e, next) {
           : Box({ flexDirection: 'row', children: runs(Text, terminalMini(prefs.style.terminal, row, 5)) }),
       )
     }
-    if (hidden) chips.push(Text({ ...tone(DIM), children: ['  +' + hidden] }))
+    if (hidden) chips.push(Text({ color: DIM, children: ['  +' + hidden] }))
     const line = Box({
       flexDirection: 'row',
       columnGap: 1,
       alignItems: 'center',
       children: [...(rows.length ? [toggle] : []), Box({ flexDirection: 'row', alignItems: 'center', children: chips }), spacer, extrasText],
     })
-    return stack(Box({ flexDirection: 'column', children: [...lane, line] }))
+    return Box({ flexDirection: 'column', children: [...lane, line] })
   }
 
   // ----- expanded -----
@@ -1422,7 +1810,7 @@ async function deckView($, e, next) {
     while (wide.length && room() < 16) wide = wide.slice(0, -1)
     wide = [(desktop ? '▤ ' : '') + folderText(room()), ...wide]
   }
-  const wideText = Box({ flexShrink: 0, children: [Text({ ...tone(MUTED), children: [wide.join('  ·  ')] })] })
+  const wideText = Box({ flexShrink: 0, children: [Text({ color: MUTED, children: [wide.join('  ·  ')] })] })
   // compact: the pet walks the header line, between the row count and the clock
   const petW = Math.max(80, Math.round(Math.max(320, cols * 8) - 170 - wide.join('  ·  ').length * 7.5))
   const headerMid = inlinePet
@@ -1432,8 +1820,7 @@ async function deckView($, e, next) {
     flexDirection: 'row',
     columnGap: 1,
     alignItems: 'center',
-    // fix for light Desktop themes (https://github.com/nvr0x5/claude-deck/pull/1)
-    children: [toggle, Text({ ...tone(DIM), children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, wideText],
+    children: [toggle, Text({ color: DIM, children: ['· ' + rows.length + (rows.length === 1 ? ' row' : ' rows')] }), headerMid, wideText],
   })
 
   if (desktop) {
@@ -1463,7 +1850,7 @@ async function deckView($, e, next) {
         ],
       })
     })
-    return stack(Box({ flexDirection: 'column', gap: prefs.size === 'roomy' ? 1 : 0, children: [...lane, header, ...lines] }))
+    return Box({ flexDirection: 'column', gap: prefs.size === 'roomy' ? 1 : 0, children: [...lane, header, ...lines] })
   }
 
   // terminal
@@ -1533,7 +1920,7 @@ async function deckView($, e, next) {
     }
     if (row.strips?.hidden.length && lines.length < maxRows) lines.push(Text({ color: DIM, children: ['    +' + row.strips.hidden.length + ' more agents'] }))
   }
-  return stack(Box({ flexDirection: 'column', children: [...lane, header, ...lines] }))
+  return Box({ flexDirection: 'column', children: [...lane, header, ...lines] })
 }
 
 export function register(on) {
@@ -1552,6 +1939,12 @@ export function register(on) {
       }
       delete prefs.stages
     }
+    // every new session opens expanded, even if the last one was collapsed (/deck always off to keep the last state)
+    if (prefs.always && !prefs.open) {
+      prefs.open = true
+      await savePrefs($)
+    }
+    if (prefs.panel) await ensurePanel($)
     await refreshUsage($)
     await readSessionModel($)
     const savedHist = await $.store.get('hist')
@@ -1559,7 +1952,10 @@ export function register(on) {
     try {
       sessionId = await $.session.id()
     } catch {}
+    sessionStartedAt = Date.now()
     await loadSpend($)
+    await refreshOptimizer($)
+    await refreshSwitches($)
     refreshWeather($).catch(() => {})
 
     $.clock.every(150, async () => {
@@ -1573,7 +1969,16 @@ export function register(on) {
       const terminalAnim = sawTerminal && frame % 2 === 0 && (rows.some((r) => r.animating) || prefs.show.pet)
       const ticking = secondTick && (prefs.show.clock || rows.some((r) => r.kind === 'meter' || r.strips))
       if (petMoved || terminalAnim || ticking) $.ui.invalidate('ui.render')
-      if (frame % 14 === 0) await syncAgents($)
+      if (frame % 14 === 0) {
+        await syncAgents($)
+        // the router stamps a switch with the API's cache figures once the first request returns
+        if (route && now - route.at < 120_000) await refreshSwitches($)
+      }
+      if (frame % 200 === 0) {
+        await refreshOptimizer($)
+        await refreshSwitches($)
+      }
+      if (prefs.panel && frame % 20 === 0) await ensurePanel($)
       if (frame % 400 === 0) await refreshUsage($)
       else if (frame % 100 === 0) await noteUsage($)
       if (frame % 8000 === 0) await refreshWeather($)
@@ -1592,6 +1997,8 @@ export function register(on) {
 
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear') {
+      cacheAt = 0
+      tokensUsed = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
       bars.clear()
       agents.clear()
       tasks.clear()
@@ -1609,9 +2016,13 @@ export function register(on) {
       return { text: want ? 'Deck expanded.' : 'Deck collapsed.' }
     }
     else if (a === 'panel' && (!b || b === 'on')) {
+      prefs.panel = true
+      await savePrefs($)
       await $.ui.open({ id: 'deck-panel', title: 'Deck' })
-      return { text: 'Deck opened in a panel.' }
+      return { text: 'Deck opened in a panel and will stay open (/deck panel off to stop).' }
     } else if (a === 'panel' && b === 'off') {
+      prefs.panel = false
+      await savePrefs($)
       await $.ui.close({ id: 'deck-panel' })
       return { text: 'Deck panel closed.' }
     }
@@ -1690,6 +2101,13 @@ export function register(on) {
       reply = 'Sample plan running above the prompt' + (demoRoute || demoUsage ? ', with sample ' + [demoRoute && 'routing', demoUsage && 'limits'].filter(Boolean).join(' and ') + ' until real ones arrive.' : '.')
     } else if (a === 'auto' && (b === 'on' || b === 'off')) prefs.auto = b === 'on'
     else if (a === 'quiet' && (b === 'on' || b === 'off')) prefs.quiet = b === 'on'
+    else if (a === 'always' && (b === 'on' || b === 'off')) {
+      prefs.always = b === 'on'
+      reply = prefs.always ? 'Deck will open expanded in every new session.' : 'Deck will start each session as the last one left it.'
+    } else if (a === 'cache' && (b === '1h' || b === '5m')) {
+      prefs.cacheTtl = b
+      reply = 'Cache timer set to ' + b + (b === '5m' ? ' (API key or usage credits).' : ' (subscription).')
+    }
     else if (a === 'size' && (b === 'compact' || b === 'roomy')) {
       prefs.size = b
       reply = b === 'compact' ? 'Deck is compact: tighter rows and a shorter pet lane.' : 'Deck is roomy: the original spacing.'
@@ -1731,9 +2149,6 @@ export function register(on) {
   })
 
   on('prompt.submit', async ($, e, next) => {
-    // refreshed before the router (or anything else) can switch this turn's model at turn.step,
-    // so the route row's "from" is what you picked, not what jev routed to
-    await readSessionModel($)
     if (e.text && !e.text.startsWith('/')) {
       lastPrompt = trunc(cleanPrompt(e.text), 40) || lastPrompt
       askedUser = false
@@ -1757,7 +2172,17 @@ export function register(on) {
   // what the main loop's first request runs with, whoever set it
   on('turn.step', async function* ($, e, next) {
     if (!e.agentId && e.index === 0) seen = { model: e.model, effort: typeof e.effort === 'string' ? e.effort : '' }
-    return yield* next(e)
+    if (!e.agentId) cacheAt = Date.now()
+    const r = yield* next(e)
+    const u = r?.usage
+    if (u) {
+      tokensUsed.input += u.input_tokens ?? 0
+      tokensUsed.output += u.output_tokens ?? 0
+      tokensUsed.cacheRead += u.cache_read_input_tokens ?? 0
+      tokensUsed.cacheWrite += u.cache_creation_input_tokens ?? 0
+      if (prefs.show.tokens) $.ui.invalidate('ui.render')
+    }
+    return r
   })
 
   // a router's one-line status: the HUD shows it as a row instead
@@ -1781,7 +2206,10 @@ export function register(on) {
   on('session.measure', async ($, e, next) => {
     dropDemoUsage()
     usage = { context: e.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, e.rateLimits) }
-    if (e.cost) await addSpend($, e.cost.usd)
+    if (e.cost) {
+      sessionUsd = e.cost.usd
+      await addSpend($, e.cost.usd)
+    }
     await noteUsage($)
     $.ui.invalidate('ui.render')
     return next(e)
@@ -1855,6 +2283,7 @@ export function register(on) {
       }
       turnActive = false
       lastActivity = Date.now()
+      cacheAt = Date.now()
     }
     return next(e)
   })

@@ -1,5 +1,76 @@
 # Changelog
 
+## 0.4.27
+
+- The Session health chip in the collapsed chips view drops the grade letter to save width: `Excellent 93` (was `Excellent (S) 93`). The wide bar still shows the letter.
+
+## 0.4.26
+
+- The collapsed chips and rings views of the Session health row show the grade word too: the chip reads `Excellent 93` (was `opt S 93`) and the ring is labelled `Excellent` (was `optimizer`).
+
+## 0.4.25
+
+- The Session and Weekly bars read `N% used` instead of repeating `5h` or `7d`, which the row title already says.
+- The Optimizer row is now titled "Session health", and its bar spells the grade in words: `Excellent (S) · 93/100 · cache hit 97%` (S Excellent, A Great, B Good, C Fair, D Poor, F Critical).
+
+## 0.4.24
+
+- The Model route row no longer runs over its right-hand cell. When the row was too narrow, the trailing items (`not applied`, the `unsure` pill, `⚠ risky`, the confidence bar) were drawn past the track and printed on top of the `held` / `↻` / `warm` mark. An item that does not fit is now left out, and `not applied` is dropped when the `unsure` pill or the mark already says why.
+
+## 0.4.23
+
+- The Model route row now says whether a model switch re-sent the conversation: `↑ ↻108k` (the new model's cache was cold and the API wrote 108k tokens to it), `↓ warm` (it read from a warm cache), `= held 184k` (the router kept the current model rather than re-send 184k). The figure is what the API reported for the first request after the switch; until it arrives, the router's own estimate shows with a `~` (`↻~108k`, `~warm`). `/deck status` spells it out.
+- Needs jev-model-router 0.9.7, which records the figures. With an older router, or with no switch this turn, the row reads `cheaper`, `deeper` or `kept` as before.
+
+## 0.4.22
+
+- The Jev model switches row now counts only this session. It used to show the router's whole saved log (its newest 100 judged switches across every session), so it never changed between sessions. It now starts at `0 switched · 0 kept` and counts entries stamped since the session began; the right-hand text reads `this session` until the first one.
+- The row is shown whenever jev-model-router is installed, including when it has logged nothing yet. The router's log has no session id, so two sessions running at once share it.
+
+## 0.4.21
+
+- The Optimizer row is now titled "Token optimizer score" and the Switches row "Jev model switches", so the left column says what each one is. Longer than about 22 characters would be cut off and squeeze the bars, so these two are the longest that fit.
+- Their right-hand text is shorter so it no longer runs over the bar label: the Switches age reads `40m ago` (was `newest 40m ago`), a stale score reads `stale 12m`, and the optimizer's reason for a grade below A is cut to 12 characters.
+- The command names are unchanged: `/deck optimizer` and `/deck switches`.
+
+## 0.4.20
+
+- New Switches row: how many times the Jev router switched your main chat's model versus kept it (`61 switched · 39 kept`), with how long ago the newest one was. It reads the router's own switch log (its newest 100 judged switches, across sessions). Toggle with `/deck switches on|off`.
+- Soft dependency: shown only when jev-model-router is installed and has logged a switch. With `routeMainModel` off the router logs nothing new, so the numbers go stale and the age grows.
+
+## 0.4.19
+
+- `/deck collapsed rings` now ends with an optimizer ring: the grade letter in a ring filled to the score, in the grade's colour, with the score beside it (`S 91 optimizer`). Chips and text already showed the Optimizer row through each row's short form, so the README and `assets/styles.svg` now show it there too.
+- Like the row, it appears only when the token-optimizer plugin has written its file for the session.
+
+## 0.4.18
+
+- New Optimizer row: the session's quality grade and score from the [token-optimizer](https://github.com/alexgreensh/token-optimizer) plugin, with the cache hit rate, and what is dragging the score down when the grade is below A. Grades: S and A green, B green with a watch, C amber, D and F red. Toggle with `/deck optimizer on|off`.
+- It is a soft dependency: Deck only reads the file token-optimizer writes (`~/.claude/token-optimizer/quality-cache-<session>.json`). Without the plugin, or before it has written the file, the row is simply not shown. Nothing is run or installed.
+
+## 0.4.17
+
+- `/deck collapsed rings` now shows the token total as `1.2M tokens`, shorter than before so the row fits. The in/out split stays in the expanded Tokens row.
+- The README and `assets/styles.svg` show the Tokens row.
+
+## 0.4.16
+
+- New Tokens row: input and output tokens this session has used, summed across every response including subagents. Toggle with `/deck tokens on|off`.
+- The `/deck collapsed rings` view shows the token total next to the spend ring (`T 1.2M tokens`).
+
+## 0.4.15
+
+- `/deck panel` now stays on. It reopens the panel each session and whenever it goes missing, until you run `/deck panel off`.
+
+## 0.4.14
+
+- The last-minute cache warning is shorter so the re-write cost is no longer clipped in the bar: `⚠ 45s · rewrite ~$0.80` instead of `⚠ expires in 45s · rewrite ~$0.80`. Nothing else about the warning changed.
+
+## 0.4.13
+
+- The Cache row warns in the last minute: it turns red and reads `⚠ expires in 45s · rewrite ~$0.80`, and the collapsed chip shows `cache ⚠45s`. The bar keeps draining, and nothing changes before the last minute.
+- The 5h and 7d limit rows say when you will hit the limit at your current pace, if that comes before the reset: `hits ~4:12pm` (or `hits ~Thu 4pm` on a later day). The bar turns amber, and red inside two hours. In the expanded rows the right-hand column shows `⚠4:12pm` in place of the reset countdown; the collapsed chips and rings keep the reset and add the hit time. It needs at least five minutes of rising usage, like the burn rate, and shows nothing when the limit resets first.
+
 ## 0.4.12
 
 - The expanded header shows the folder the session works in, with your home folder as `~` (for example `~/Documents/deck`). It follows `/cd` and worktree moves, a long path is cut from the left, and a narrow header drops the weather and clock before the folder. `/deck folder off` hides it. From [#5](https://github.com/nvr0x5/claude-deck/pull/5), thanks @narjes-abs.
