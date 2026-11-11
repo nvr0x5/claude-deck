@@ -68,13 +68,20 @@ Mods need Claude Code 2.1.286 or later. To try it from a clone without installin
 | **Activity bar** | What Claude is doing right now (`Editing auth.ts · 14 tools · 1m 12s`) | Any turn without a todo list |
 | **Agent strips** | Each subagent's current tool, its model, elapsed time | Subagents, under the bar that started them |
 | **Context** | Tokens used out of the window | Your session |
-| **5h and 7d limits** | Percent used, a live countdown to each reset, and how fast you're burning it (`+12%/h`) | Your plan's rate limits, no `/usage` needed |
+| **5h and 7d limits** | Percent used, a live countdown to each reset, how fast you're burning it (`+12%/h`), and where you'll land at reset at that pace (`~45% at reset`, or `out in ~50m` when it fills up first) | Your plan's rate limits, no `/usage` needed |
 | **Spend** (optional) | What you've spent today and this month | Your session cost, added up across sessions. Turn on with `/deck cost on`; it matters on a pay-per-use API key |
 | **Model route** | Which model and effort a router picked, and how sure it was | [jev-model-router](#model-routing), if installed |
 | **Clock and weather** | Local time and the weather where you are | Open-Meteo, no key |
 | **Folder** | The folder the session works in (`~/Documents/deck`), in the expanded header; a long path is cut from the left | Your session |
 
 When something needs you (a permission prompt, a question, a reply ending in `?`), its row turns amber, a collapsed Deck opens by itself, and a soft alert plays. Steps tick, finished bars chime, and the last one plays a little fanfare.
+
+**Alerts.** Deck also warns you before you hit a wall, with a toast, a sound, and the panel opening by itself:
+
+- a usage limit is on pace to run out before it resets, then passes 80% and 90%
+- the context passes 60% (a nudge to run `/compact` while you still choose what's kept) and 85% (auto-compact is close)
+
+Each limit alert fires once per window, across all your sessions; the context alerts come back after a compact. Change the thresholds with `/deck alerts 80,90` and `/deck alerts context 60,85`, or turn them off with `/deck alerts off`.
 
 **Collapsed**, Deck is one line ordered by what matters: anything waiting on you, then your **5h and 7d limits**, context, the current task, and the route. Pick its look:
 
@@ -120,6 +127,8 @@ On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it 
 | `/deck collapsed chips\|text\|rings` | Collapsed look: chips with mini bars, one plain line, or limit rings |
 | `/deck cost on\|off` | Track spend today and this month |
 | `/deck auto on\|off` | Open by itself when something needs you |
+| `/deck alerts on\|off` | Toast and sound when a limit or the context runs high |
+| `/deck alerts 80,90` | Limit thresholds; `/deck alerts context 60,85` for the context |
 | `/deck sound on\|off` | Sounds |
 | `/deck quiet on\|off` | Hide the router's own lines while Deck shows the route |
 | `/deck demo` | A sample plan with two agents (plus a sample route and limits until real ones arrive) |

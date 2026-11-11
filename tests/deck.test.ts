@@ -27,7 +27,8 @@ const PICKER = {
 const inAnHour = () => new Date(Date.now() + 3600_000 + 14 * 60_000).toISOString()
 
 // Everything Claude Code would answer for this mod
-function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ result: 'ok' }), usageValue: any = null, home = '/Users/you') {
+// check: what the permission prompt answers; the test kit denies a tool left at 'ask' (Claude Code 2.1.319)
+function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ result: 'ok' }), usageValue: any = null, home = '/Users/you', check = 'ask') {
   const clock = mock.clock(on)
   on('store.get', ($, e) => ({ value: saved.get(e.key) }))
   on('store.set', ($, e) => {
@@ -63,7 +64,7 @@ function stubs(on, saved = new Map<string, unknown>(), toolCall: any = () => ({ 
   on('classic.CwdChanged', () => ({}))
   on('prompt.submit', ($, e) => ({ text: e.text }))
   on('tool.call', toolCall)
-  on('tool.check', () => ({ decision: 'ask' }))
+  on('tool.check', () => ({ decision: check }))
   on('turn.complete', () => ({ text: '' }))
   on('ui.status', () => ({ value: undefined }))
   on('session.measure', ($, e) => ({ changed: e.changed }))
@@ -341,7 +342,7 @@ test('agents with no live bar get their own Agents bar', async ($, on) => {
 })
 
 test('an approved plan becomes a bar with stages', async ($, on) => {
-  stubs(on)
+  stubs(on, undefined, undefined, null, undefined, 'allow')
   await start($)
   const plan = '# Checkout rework\n\n## Backend\n1. Add cart table\n2. Write API\n\n## Frontend\n- Cart page\n- Pay button\n'
   await $.tool.call({ tool: 'ExitPlanMode', plan })
@@ -355,7 +356,7 @@ test('task tools: ids and statuses come from the results, and a new batch starts
     if (e.tool === 'TaskCreate') return { result: { task: { id: String(next++), subject: e.subject } } }
     if (e.tool === 'TaskUpdate') return { result: { success: true, taskId: e.taskId, updatedFields: ['status'] } }
     return { result: 'ok' }
-  })
+  }, null, undefined, 'allow')
   await start($)
   await $.tool.call({ tool: 'TaskCreate', subject: 'Old one', description: '' })
   await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'completed' })
@@ -715,4 +716,76 @@ test('a shell cd alone leaves the header on the project folder', async ($, on) =
   await $.tool.call({ tool: 'Bash', command: 'cd /tmp && ls' })
   const ui = await $.ui.mount({ ...BAND, surface: 'terminal' })
   expect((await header(ui)).children.join('')).toMatch(/^~\/Documents\/deck /)
+})
+
+const inMinutes = (m: number) => new Date(Date.now() + m * 60_000).toISOString()
+const limit5h = (p: number, resetsAt: string) => ({ rateLimits: [{ kind: 'five_hour', percentUsed: p, resetsAt }], changed: ['rateLimits'] })
+
+// usage history as an earlier session saved it: the 5h window at p, ten minutes ago
+const tenMinutesAgo = (p: number) => new Map<string, unknown>([['hist', { five_hour: [{ t: Date.now() - 10 * 60_000, p }] }]])
+
+test('a limit on pace to run out before it resets says so, with a toast, and opens Deck', async ($, on) => {
+  stubs(on, tenMinutesAgo(40))
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => (toasts.push(e.text ?? String(e)), { value: undefined }))
+  await start($)
+  const resets = inMinutes(74)
+  await $.session.measure(limit5h(50, resets))
+  let out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/5h · 50% used · out in ~50m/)
+  expect(out.text).toMatch(/expanded/)
+  expect(toasts).toHaveLength(1)
+  expect(toasts[0]).toMatch(/Session · 5h is on pace to run out in ~50m, before it resets/)
+  await $.session.measure(limit5h(51, resets))
+  expect(toasts).toHaveLength(1)
+  await $.session.measure(limit5h(85, resets))
+  expect(toasts[1]).toMatch(/Session · 5h at 85%\. Resets in/)
+  await $.session.measure(limit5h(92, resets))
+  expect(toasts[2]).toMatch(/Session · 5h at 92%\. Out in ~/)
+  await $.session.measure(limit5h(93, resets))
+  expect(toasts).toHaveLength(3)
+})
+
+test('a slow limit shows where it lands at reset, without an alert', async ($, on) => {
+  stubs(on, tenMinutesAgo(30))
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => (toasts.push(e.text ?? String(e)), { value: undefined }))
+  await start($)
+  await $.session.measure(limit5h(32, inMinutes(64)))
+  const out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/5h · 32% used · ~45% at reset/)
+  expect(toasts).toHaveLength(0)
+})
+
+test('context alerts follow /deck alerts context, and come back after a compact', async ($, on) => {
+  stubs(on)
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => (toasts.push(e.text ?? String(e)), { value: undefined }))
+  await start($)
+  const reply = await $.command.run({ command: 'deck', args: 'alerts context 50,70' })
+  expect(reply.text).toMatch(/context at 50% and 70%/)
+  const ctx = (p: number) => ({ context: { tokens: p * 10_000, window: 1_000_000, percent: p }, changed: ['context'] })
+  await $.session.measure(ctx(55))
+  expect(toasts[0]).toMatch(/Context at 55%\. Run \/compact soon/)
+  let out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/Context — 550k \/ 1M · \/compact/)
+  await $.session.measure(ctx(60))
+  expect(toasts).toHaveLength(1)
+  await $.session.measure(ctx(72))
+  expect(toasts[1]).toMatch(/Context at 72%\. Auto-compact is close/)
+  await $.session.measure(ctx(20))
+  await $.session.measure(ctx(52))
+  expect(toasts).toHaveLength(3)
+})
+
+test('/deck alerts off keeps quiet, and a bad threshold is explained', async ($, on) => {
+  stubs(on)
+  const toasts: string[] = []
+  on('ui.toast', ($, e) => (toasts.push(e.text ?? String(e)), { value: undefined }))
+  await start($)
+  expect((await $.command.run({ command: 'deck', args: 'alerts off' })).text).toMatch(/^Alerts off/)
+  await $.session.measure({ context: { tokens: 950_000, window: 1_000_000, percent: 95 }, ...limit5h(97, inMinutes(30)) })
+  expect(toasts).toHaveLength(0)
+  expect((await $.command.run({ command: 'deck', args: 'alerts 90,80' })).text).toMatch(/^Use \/deck alerts/)
+  expect((await $.command.run({ command: 'deck', args: 'alerts 70,95' })).text).toMatch(/limits at 70% and 95%/)
 })

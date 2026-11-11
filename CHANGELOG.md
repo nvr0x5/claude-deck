@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.13
+
+- Limit rows show where you'll land at reset at your current pace, `5h · 31% used · ~45% at reset`, or `out in ~50m` when the window fills up first. A limit on pace to run out turns amber.
+- Alerts: a toast, a sound and the panel opening by itself when a limit is on pace to run out before it resets, passes 80% or 90%, or the context passes 60% or 85%. Each limit alert fires once per window across sessions; the context alerts come back after a compact. `/deck alerts off`, `/deck alerts 80,90`, `/deck alerts context 60,85`.
+- The context row's marks and colors follow your context thresholds, and say `/compact` once you're past the first one.
+- Tests: tools the plan and task tests call are now allowed, since newer Claude Code test kits deny a tool left at "ask".
+
 ## 0.4.12
 
 - The expanded header shows the folder the session works in, with your home folder as `~` (for example `~/Documents/deck`). It follows `/cd` and worktree moves, a long path is cut from the left, and a narrow header drops the weather and clock before the folder. `/deck folder off` hides it. From [#5](https://github.com/nvr0x5/claude-deck/pull/5), thanks @narjes-abs.

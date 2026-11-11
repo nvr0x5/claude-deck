@@ -22,6 +22,8 @@ const DEFAULT_PREFS = {
   size: 'compact', // 'compact' (tight rows, short pet lane) or 'roomy' (the 0.4 spacing)
   collapsed: 'chips', // 'chips' (mini bars), 'text' (one plain status line) or 'rings' (limit rings and cost)
   cost: false, // track spend today and this month (pay-per-use API keys)
+  // a toast, a sound and auto-expand when a usage limit or the context crosses a threshold
+  alerts: { on: true, limits: [80, 90], context: [60, 85] },
   city: null, // { name, lat, lon }
 }
 
@@ -34,7 +36,7 @@ const FOLD_MS = 5000
 const MAX_STRIPS = 4
 const ASK_DELAY_MS = 600
 const TRACK_H = 22
-const VERSION = '0.4.12' // keep in step with .claude-plugin/plugin.json (a test checks)
+const VERSION = '0.4.13' // keep in step with .claude-plugin/plugin.json (a test checks)
 const RIGHT_W = 92
 const HEADER_CH = 20 // the terminal header's toggle and row count, with their gaps
 const TITLE_MAX_CH = 22 // a long prompt as a bar title would squeeze every track
@@ -174,18 +176,41 @@ function series(key, windowMs, now) {
   return list.map((x) => x.p)
 }
 
-// how fast a window moves: percent per hour (or per day for the weekly window)
-function burnRate(key, now) {
+// how fast a window moves, in percent per millisecond, over the last hour (a day for the weekly window)
+function burnPerMs(key, now) {
   const daily = key.startsWith('seven_day')
   const list = (hist[key] ?? []).filter((x) => now - x.t <= (daily ? 24 : 1) * 3600_000)
-  if (list.length < 2) return ''
+  if (list.length < 2) return null
   const a = list[0]
   const b = list[list.length - 1]
   const span = b.t - a.t
-  if (span < 5 * 60_000 || b.p < a.p) return ''
-  const per = ((b.p - a.p) / span) * (daily ? 86_400_000 : 3_600_000)
+  if (span < 5 * 60_000 || b.p < a.p) return null
+  return (b.p - a.p) / span
+}
+
+// the same as a label: percent per hour (or per day for the weekly window)
+function burnRate(key, now) {
+  const r = burnPerMs(key, now)
+  if (r == null) return ''
+  const daily = key.startsWith('seven_day')
+  const per = r * (daily ? 86_400_000 : 3_600_000)
   if (per < 0.05) return ''
   return '+' + (per < 10 ? per.toFixed(1) : Math.round(per)) + (daily ? '%/day' : '%/h')
+}
+
+// where a limit window lands when it resets, at the current pace; outInMs when it fills up first
+function paceOf(rl, now) {
+  const r = burnPerMs(rl.kind, now)
+  if (!r || !rl.resetsAt) return null
+  const left = Date.parse(rl.resetsAt) - now
+  if (!(left > 0)) return null
+  const atReset = rl.percentUsed + r * left
+  return { atReset, outInMs: atReset > 100 ? Math.max(0, (100 - rl.percentUsed) / r) : null }
+}
+
+function fmtDur(ms) {
+  const m = Math.max(1, Math.round(ms / 60_000))
+  return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h' + (m % 60 ? (m % 60) + 'm' : '')
 }
 
 // spend: this session's running total, added into today and this month across sessions
@@ -745,17 +770,18 @@ function collectRows(now) {
   const ctx = usage.context
   if (prefs.show.context && ctx && ctx.percent != null) {
     const p = ctx.percent
+    const [soon, close] = prefs.alerts.context
     rows.push({
       id: 'context',
       kind: 'meter',
-      style: p >= 80 ? 'hot' : p >= 60 ? 'warn' : 'run',
+      style: p >= close ? 'hot' : p >= soon ? 'warn' : 'run',
       title: 'Context',
       pct: p,
-      marks: [{ f: 0.5 }, { f: 0.8 }],
-      name: fmtK(ctx.tokens) + ' / ' + fmtK(ctx.window),
+      marks: [{ f: soon / 100 }, { f: close / 100 }],
+      name: fmtK(ctx.tokens) + ' / ' + fmtK(ctx.window) + (p >= soon ? ' · /compact' : ''),
       count: '',
       right: Math.round(p) + '%',
-      short: 'ctx ' + Math.round(p) + '%',
+      short: 'ctx ' + Math.round(p) + '%' + (p >= soon ? ' /compact' : ''),
       section: 'context',
       hist: series('context', 3600_000, now),
       rate: burnRate('context', now),
@@ -765,18 +791,23 @@ function collectRows(now) {
     for (const rl of usage.rateLimits ?? []) {
       const [title, tag] = limitName(rl.kind)
       const p = rl.percentUsed
+      // at this pace: where it lands at reset, or how soon it runs out before then
+      const pace = paceOf(rl, now)
+      const out = pace && pace.outInMs != null ? 'out in ~' + fmtDur(pace.outInMs) : ''
+      const atReset = pace && !out && pace.atReset >= p + 1 ? '~' + Math.round(pace.atReset) + '% at reset' : ''
       rows.push({
         id: 'limit:' + rl.kind,
         kind: 'meter',
         limit: true,
-        style: p >= 80 ? 'hot' : p >= 50 ? 'warn' : 'ok',
+        style: p >= 80 ? 'hot' : p >= 50 || out ? 'warn' : 'ok',
         title,
         pct: Math.min(100, p),
         marks: [{ f: 0.25 }, { f: 0.5 }, { f: 0.75 }],
-        name: tag + ' · ' + Math.round(p) + '% used',
+        name: tag + ' · ' + Math.round(p) + '% used' + (out || atReset ? ' · ' + (out || atReset) : ''),
         count: '',
         right: rl.resetsAt ? '↻ ' + countdown(rl.resetsAt) : '',
-        short: tag + ' ' + Math.round(p) + '%' + (rl.resetsAt ? ' ↻' + humanReset(rl.resetsAt) : ''),
+        short: tag + ' ' + Math.round(p) + '%' + (out ? ' out ~' + fmtDur(pace.outInMs) : rl.resetsAt ? ' ↻' + humanReset(rl.resetsAt) : ''),
+        pace,
         section: 'limits',
         kindKey: rl.kind,
         resets: rl.resetsAt ? humanReset(rl.resetsAt) : '',
@@ -985,6 +1016,48 @@ function play($, name) {
   $.audio.play({ asset: 'sounds/' + name + '.wav' }, { gain: 0.6 }).catch(() => {})
 }
 
+// usage alerts: each fires once per limit window (kept across sessions), the context's again after a compact
+let alerted = new Set()
+
+async function checkAlerts($) {
+  if (!prefs.alerts.on || demoUsage) return
+  const now = Date.now()
+  const fresh = [] // [keys, severity, text], most severe first
+  const [warnAt, hotAt] = prefs.alerts.limits
+  for (const rl of usage.rateLimits ?? []) {
+    const [title] = limitName(rl.kind)
+    const p = rl.percentUsed
+    const win = rl.kind + '@' + (rl.resetsAt ?? '')
+    const resets = rl.resetsAt ? ' Resets in ' + humanReset(rl.resetsAt) + '.' : ''
+    const pace = paceOf(rl, now)
+    if (p >= hotAt) fresh.push([[win + ':' + hotAt, win + ':' + warnAt, win + ':out'], 'hot', title + ' at ' + Math.round(p) + '%.' + (pace?.outInMs != null ? ' Out in ~' + fmtDur(pace.outInMs) + '.' : '') + resets])
+    else if (p >= warnAt) fresh.push([[win + ':' + warnAt], 'warn', title + ' at ' + Math.round(p) + '%.' + resets])
+    if (p < hotAt && p >= 40 && pace?.outInMs != null)
+      fresh.push([[win + ':out'], 'warn', title + ' is on pace to run out in ~' + fmtDur(pace.outInMs) + ', before it resets in ' + humanReset(rl.resetsAt) + '.'])
+  }
+  const cp = usage.context?.percent
+  if (cp != null) {
+    const [soon, close] = prefs.alerts.context
+    // a compact brings the context back down: its alerts can fire again on the next climb
+    if (cp < soon - 5) for (const k of [...alerted]) if (k.startsWith('context:')) alerted.delete(k)
+    if (cp >= close) fresh.push([['context:' + close, 'context:' + soon], 'hot', 'Context at ' + Math.round(cp) + '%. Auto-compact is close: run /compact now.'])
+    else if (cp >= soon) fresh.push([['context:' + soon], 'warn', 'Context at ' + Math.round(cp) + '%. Run /compact soon, so you choose what is kept.'])
+  }
+  const due = fresh.filter(([keys]) => !alerted.has(keys[0])).sort((a, b) => (a[1] === 'hot' ? 0 : 1) - (b[1] === 'hot' ? 0 : 1))
+  if (!due.length) return
+  for (const [keys] of due) for (const k of keys) alerted.add(k)
+  // one toast at a time: the most pressing
+  try {
+    $.ui.toast(due[0][2], { timeoutMs: 10_000 })
+  } catch {}
+  play($, 'alert')
+  if (prefs.auto && !isOpening()) setOpen($, true)
+  // windows that already reset no longer need their keys
+  const live = new Set((usage.rateLimits ?? []).map((rl) => rl.kind + '@' + (rl.resetsAt ?? '')))
+  for (const k of [...alerted]) if (!k.startsWith('context:') && !live.has(k.slice(0, k.lastIndexOf(':')))) alerted.delete(k)
+  await $.store.set('alerted', [...alerted]).catch(() => {})
+}
+
 function setOpen($, want) {
   if (want === isOpening()) return
   if (fold && fold.timer) fold.timer.cancel()
@@ -1032,6 +1105,7 @@ async function refreshUsage($) {
     usage = { context: u.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, u.rateLimits) }
     if (u.cost) await addSpend($, u.cost.usd)
     await noteUsage($)
+    await checkAlerts($)
   } catch {}
 }
 
@@ -1161,7 +1235,8 @@ function statusText() {
     (lines.length ? lines.join('\n') : 'No rows yet.') +
     '\nShowing: ' + on + ' · ' + (prefs.open ? 'expanded' : 'collapsed') +
     ' · style ' + prefs.style.terminal + ' (CLI) / ' + prefs.style.desktop + ' (Desktop)' +
-    ' · pet ' + pet.act + ' · auto-expand ' + (prefs.auto ? 'on' : 'off') + ' · sound ' + (prefs.sound ? 'on' : 'off') +
+    ' · pet ' + pet.act + ' · auto-expand ' + (prefs.auto ? 'on' : 'off') +
+    ' · alerts ' + (prefs.alerts.on ? 'limits ' + prefs.alerts.limits.join('/') + '%, context ' + prefs.alerts.context.join('/') + '%' : 'off') + ' · sound ' + (prefs.sound ? 'on' : 'off') +
     (prefs.city ? ' · city ' + prefs.city.name : '') +
     ' · Deck ' + VERSION
   )
@@ -1181,6 +1256,8 @@ const HELP = [
   '/deck collapsed chips|text|rings  collapsed look: chips with mini bars, one plain line, or limit rings',
   '/deck cost on|off         track spend today and this month (pay-per-use API keys)',
   '/deck auto on|off          expand when something needs you',
+  '/deck alerts on|off        a toast and a sound when a limit or the context runs high',
+  '/deck alerts 80,90         limit thresholds · /deck alerts context 60,85 for the context',
   '/deck sound on|off',
   '/deck demo                 play a sample plan with agents',
   '/deck clear                remove all bars',
@@ -1549,13 +1626,16 @@ export function register(on) {
         ...saved,
         show: { ...DEFAULT_PREFS.show, ...(saved.show ?? {}) },
         style: { ...DEFAULT_PREFS.style, ...(saved.style ?? {}) },
+        alerts: { ...DEFAULT_PREFS.alerts, ...(saved.alerts ?? {}) },
       }
       delete prefs.stages
     }
-    await refreshUsage($)
-    await readSessionModel($)
+    const savedAlerted = await $.store.get('alerted')
+    if (Array.isArray(savedAlerted)) alerted = new Set(savedAlerted)
     const savedHist = await $.store.get('hist')
     if (savedHist && typeof savedHist === 'object') hist = savedHist
+    await refreshUsage($)
+    await readSessionModel($)
     try {
       sessionId = await $.session.id()
     } catch {}
@@ -1688,6 +1768,23 @@ export function register(on) {
         $.ui.invalidate('ui.render')
       })
       reply = 'Sample plan running above the prompt' + (demoRoute || demoUsage ? ', with sample ' + [demoRoute && 'routing', demoUsage && 'limits'].filter(Boolean).join(' and ') + ' until real ones arrive.' : '.')
+    } else if (a === 'alerts') {
+      const pair = (v) => {
+        const m = /^(\d{1,3}),(\d{1,3})$/.exec(v ?? '')
+        const x = m && [Number(m[1]), Number(m[2])]
+        return x && x[0] >= 1 && x[0] < x[1] && x[1] <= 100 ? x : null
+      }
+      const what = () => 'Alerts ' + (prefs.alerts.on ? 'on' : 'off') + ': limits at ' + prefs.alerts.limits.join('% and ') + '%, context at ' + prefs.alerts.context.join('% and ') + '%.'
+      if (b === 'on' || b === 'off') {
+        prefs.alerts.on = b === 'on'
+        reply = what()
+      } else if (b === 'context' && pair(rest[0])) {
+        prefs.alerts.context = pair(rest[0])
+        reply = what()
+      } else if (pair(b)) {
+        prefs.alerts.limits = pair(b)
+        reply = what()
+      } else reply = b ? 'Use /deck alerts on|off, /deck alerts 80,90 for limits, or /deck alerts context 60,85.' : what()
     } else if (a === 'auto' && (b === 'on' || b === 'off')) prefs.auto = b === 'on'
     else if (a === 'quiet' && (b === 'on' || b === 'off')) prefs.quiet = b === 'on'
     else if (a === 'size' && (b === 'compact' || b === 'roomy')) {
@@ -1783,6 +1880,7 @@ export function register(on) {
     usage = { context: e.context ?? usage.context, rateLimits: mergeLimits(usage.rateLimits, e.rateLimits) }
     if (e.cost) await addSpend($, e.cost.usd)
     await noteUsage($)
+    await checkAlerts($)
     $.ui.invalidate('ui.render')
     return next(e)
   })
@@ -1946,8 +2044,9 @@ export function register(on) {
       applyTaskResult(e, ran.result)
       $.ui.invalidate('ui.render')
     }
-    // a worktree move or /cd may have moved the project folder, with or without CwdChanged
-    if (!e.agentId) await refreshFolder($)
+    // a worktree move or /cd may have moved the project folder, with or without CwdChanged;
+    // not awaited, so a slow answer never holds up the tool's result or the bars below
+    if (!e.agentId) refreshFolder($)
     if (e.tool === 'ExitPlanMode' && ok) {
       const text = typeof e.plan === 'string' ? e.plan : ran.result?.plan
       const parsed = typeof text === 'string' ? parsePlan(text) : null
