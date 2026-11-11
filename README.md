@@ -108,9 +108,24 @@ Pick how the bars look with `/deck style`, a picker with live previews. Each app
 
 ## The pet
 
-A tiny Claude walks along Deck's header line (in its own strip above the panel with `/deck size roomy`, and always in the terminal). It wanders, runs, jumps and naps when you're idle, plays a console while Claude works, raises a **!** when something needs you, and celebrates when a bar finishes.
+A tiny Claude walks along Deck's header line (in its own strip above the panel with `/deck size roomy`, and always in the terminal), and acts out what Claude is doing, so a glance tells you:
 
-On Desktop it's an animated SVG. In the terminal it's drawn as a picture, so it needs a terminal that shows images: Ghostty, Kitty, WezTerm or iTerm2. Elsewhere it simply stays hidden. `/deck pet off` sends it home.
+| Claude is | The pet |
+|---|---|
+| thinking, no tool yet | sits with a thought bubble |
+| reading a file (Read) | reads a book |
+| searching (Grep, Glob) | sweeps a magnifier |
+| editing (Edit, Write) | types on a laptop |
+| running a command (Bash) | holds a little terminal |
+| on the web (WebFetch, WebSearch) | spins a globe |
+| running subagents | brings little helpers in their model's color: haiku green, sonnet violet, opus amber |
+| waiting on you | bounces a **!** |
+| done with a plan | jumps with confetti |
+| hitting a failed tool or agent | X eyes and a puff of smoke |
+| idle, near a usage limit | sweats |
+| idle for 3 minutes | puts on a nightcap |
+
+Otherwise it wanders, runs and looks around. It's drawn once and rendered both ways: on Desktop as an animated SVG, in the terminal as a picture, so it needs a terminal that shows images: Ghostty, Kitty, WezTerm or iTerm2. Elsewhere it simply stays hidden. `/deck pet off` sends it home.
 
 ## Commands
 

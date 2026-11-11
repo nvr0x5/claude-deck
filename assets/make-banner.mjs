@@ -1,5 +1,5 @@
 // Builds assets/banner.svg from the mod's own pet and bar drawings.
-import { petSvgBody, PET_CSS } from '../hooks/pet.js'
+import { petSvgBody, PET_CSS, PET_VIEWBOX } from '../hooks/pet.js'
 import { desktopTrack } from '../hooks/styles-desktop.js'
 import { writeFileSync } from 'fs'
 const W = 1280, H = 320
@@ -35,6 +35,6 @@ const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" 
 <text x="84" y="266" style="font:400 16px ui-monospace,SFMono-Regular,Menlo,monospace;fill:#9C95EC">/deck<tspan fill="#9a9893"> ▸ 5h 31% ↻2:14:09 │ 7d 64% │ Fixing auth 3/5</tspan><tspan class="cur" fill="#f2f0ea"> ▋</tspan></text>
 ${bars}
 <rect x="700" y="128" width="1" height="130" fill="#fff" opacity=".06"/>
-<g transform="translate(720 52)"><g class="walk"><g class="face" style="transform-box:fill-box;transform-origin:center"><g class="pw"><svg width="76" height="60" viewBox="-4 -6 48 38" overflow="visible">${petSvgBody('walk')}</svg></g><g class="pc"><svg width="76" height="60" viewBox="-4 -6 48 38" overflow="visible">${petSvgBody('console')}</svg></g><g class="pa"><svg width="76" height="60" viewBox="-4 -6 48 38" overflow="visible">${petSvgBody('alert')}</svg></g><g class="pk"><svg width="76" height="60" viewBox="-4 -6 48 38" overflow="visible">${petSvgBody('celebrate')}</svg></g><g class="pi"><svg width="76" height="60" viewBox="-4 -6 48 38" overflow="visible">${petSvgBody('idle')}</svg></g></g></g></g>
+<g transform="translate(720 52)"><g class="walk"><g class="face" style="transform-box:fill-box;transform-origin:center"><g class="pw"><svg x="-6.3" y="-6.3" width="101" height="66.5" viewBox="${PET_VIEWBOX}" overflow="visible">${petSvgBody('walk')}</svg></g><g class="pc"><svg x="-6.3" y="-6.3" width="101" height="66.5" viewBox="${PET_VIEWBOX}" overflow="visible">${petSvgBody('type')}</svg></g><g class="pa"><svg x="-6.3" y="-6.3" width="101" height="66.5" viewBox="${PET_VIEWBOX}" overflow="visible">${petSvgBody('alert')}</svg></g><g class="pk"><svg x="-6.3" y="-6.3" width="101" height="66.5" viewBox="${PET_VIEWBOX}" overflow="visible">${petSvgBody('celebrate')}</svg></g><g class="pi"><svg x="-6.3" y="-6.3" width="101" height="66.5" viewBox="${PET_VIEWBOX}" overflow="visible">${petSvgBody('idle')}</svg></g></g></g></g>
 </g></svg>`
 writeFileSync(new URL('./banner.svg', import.meta.url), svg)

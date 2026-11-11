@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0
+
+- **A new pet.** Redrawn, with 15 poses that follow what Claude is really doing instead of a random pick: a thought bubble while it thinks, a book for Read, a magnifier for Grep and Glob, a laptop for Edit and Write, a terminal for Bash, a globe for the web, little helpers in their model's color for subagents, X eyes when a tool fails, a sweat drop near a usage limit, and a nightcap when idle.
+- Fixed: running leaned backward, seated poses floated over a bar, legs swung from the hip, the book faced the wrong way, and turning around snapped instead of turning.
+- The pet is drawn once and rendered two ways, so Desktop and the terminal always match. Animations stay in step across redraws instead of restarting.
+- README images use the new pet.
+
 ## 0.4.13
 
 - Limit rows show where you'll land at reset at your current pace, `5h · 31% used · ~45% at reset`, or `out in ~50m` when the window fills up first. A limit on pace to run out turns amber.

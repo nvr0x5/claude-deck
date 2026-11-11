@@ -8,7 +8,7 @@
 import { STYLE, TIER, TRACK, DIM, MUTED, TEXT, trunc, textWidth, esc, runs, textCells } from './theme.js'
 import { TERMINAL_STYLES, TERMINAL_STYLE_NAMES, terminalBar, terminalMini } from './styles-terminal.js'
 import { DESKTOP_STYLES, DESKTOP_STYLE_NAMES, desktopTrack, stripsSvg, stripsHeight } from './styles-desktop.js'
-import { createPet, stepPet, petX, petLaneSvg, petFrame, PET_RASTER } from './pet.js'
+import { createPet, stepPet, petX, petLaneSvg, petFrame, PET_RASTER, PET_TURN_S } from './pet.js'
 
 const SECTIONS = ['plans', 'agents', 'context', 'limits', 'route', 'pet', 'clock', 'weather', 'folder']
 
@@ -36,7 +36,7 @@ const FOLD_MS = 5000
 const MAX_STRIPS = 4
 const ASK_DELAY_MS = 600
 const TRACK_H = 22
-const VERSION = '0.4.13' // keep in step with .claude-plugin/plugin.json (a test checks)
+const VERSION = '0.5.0' // keep in step with .claude-plugin/plugin.json (a test checks)
 const RIGHT_W = 92
 const HEADER_CH = 20 // the terminal header's toggle and row count, with their gaps
 const TITLE_MAX_CH = 22 // a long prompt as a bar title would squeeze every track
@@ -262,6 +262,11 @@ let demoRoute = false
 let demoUsage = false
 let lastActivity = Date.now()
 let celebrateUntil = 0
+let oopsUntil = 0
+// the main thread's latest tool this turn, which the pet acts out
+let petTool = null // { act, at }
+const TOOL_ACT = { Read: 'read', Grep: 'search', Glob: 'search', Edit: 'type', MultiEdit: 'type', Write: 'type', NotebookEdit: 'type', Bash: 'terminal', WebFetch: 'browse', WebSearch: 'browse', Agent: 'delegate', Task: 'delegate' }
+const THINK_AFTER_MS = 8000
 
 // ---------- small helpers ----------
 
@@ -825,12 +830,24 @@ function collapsedOrder(rows) {
   return [...rows].sort((a, b) => rank(a) - rank(b))
 }
 
+// what the pet does: what needs you first, then a finish or a failure, then the work under way
 function petMood(rows, now) {
   if (rows.some((r) => r.state === 'needs_input')) return 'alert'
   if (now < celebrateUntil) return 'celebrate'
-  if (turnActive) return 'working'
+  if (now < oopsUntil) return 'error'
+  if (turnActive) {
+    if (runningMinis().length) return 'work:delegate'
+    // a tool that finished a while ago, with the turn still going: Claude is thinking again
+    return 'work:' + (petTool && now - petTool.at < THINK_AFTER_MS ? petTool.act : 'think')
+  }
+  if (rows.some((r) => r.limit && r.pct >= prefs.alerts.limits[1])) return 'worried'
   if (now - lastActivity > SLEEPY_MS) return 'sleepy'
   return 'calm'
+}
+
+// the model tiers of the subagents running now, for the little ones next to the pet
+function runningMinis() {
+  return [...agents.values()].filter((a) => !a.depth && (a.state === 'running' || a.state === 'waiting') && a.home !== 'demo').map((a) => shortModel(a.model)).filter((m) => m in TIER)
 }
 
 // ---------- drawing pieces ----------
@@ -1184,6 +1201,7 @@ function finishAgent(id, state, tool) {
   a.state = state
   a.tool = tool
   a.endedAt = Date.now()
+  if (state === 'error') oopsUntil = Date.now() + 2500
   waiting.delete(id)
   syncAgentsBar()
   const bar = a.home === 'activity' ? activity && { id: 'activity', set agentsDoneAt(v) { activity.agentsDoneAt = v } } : bars.get(a.home)
@@ -1319,7 +1337,7 @@ async function deckView($, e, next) {
       // leave a margin: a row as wide as the band gets cut and marked with [-]
       const room = Math.max(0, cols - PET_COLS - 4)
       const x = Math.round(petX(pet, nowMs) * room)
-      const px = petFrame(pet.act, nowMs - pet.start, pet.dir)
+      const px = petFrame(pet.act, nowMs, pet.dir, { minis: pet.minis, turn: (nowMs - pet.turnAt) / 1000 / PET_TURN_S })
       lane.push(
         Box({
           flexDirection: 'row',
@@ -1503,7 +1521,7 @@ async function deckView($, e, next) {
   // compact: the pet walks the header line, between the row count and the clock
   const petW = Math.max(80, Math.round(Math.max(320, cols * 8) - 170 - wide.join('  ·  ').length * 7.5))
   const headerMid = inlinePet
-    ? Box({ flexGrow: 1, overflow: 'hidden', children: [Svg({ source: petLaneSvg(pet, nowMs, petW, 28, 0.7), alt: 'Claude pet, ' + pet.act, width: petW, height: 28 })] })
+    ? Box({ flexGrow: 1, overflow: 'hidden', children: [Svg({ source: petLaneSvg(pet, nowMs, petW, 28, 0.66), alt: 'Claude pet, ' + pet.act, width: petW, height: 28 })] })
     : spacer
   const header = Box({
     flexDirection: 'row',
@@ -1647,6 +1665,7 @@ export function register(on) {
       const now = Date.now()
       const rows = collectRows(now)
       react($, rows, now)
+      pet.minis = runningMinis()
       const petMoved = prefs.show.pet && stepPet(pet, petMood(rows, now), now)
       const secondTick = now - lastSecond >= 1000
       if (secondTick) lastSecond = now
@@ -1745,6 +1764,7 @@ export function register(on) {
       let n = 0
       demoTimer = $.clock.every(1400, () => {
         n++
+        petTool = { act: ['read', 'search', 'type', 'terminal'][Math.floor(n / 2) % 4], at: Date.now() }
         const d = bars.get('demo')
         if (!d) return demoTimer.cancel()
         const a2 = agents.get('demo-a2')
@@ -1845,6 +1865,7 @@ export function register(on) {
       adoptRunningAgents()
       for (const a of [...agents.values()]) if (a.home === 'activity') agents.delete(a.id)
       activity = { title: lastPrompt || 'Working', start: Date.now(), tools: 0, action: 'Thinking', done: false, doneAt: 0, agentsDoneAt: null }
+      petTool = null
     }
     turnActive = true
     lastActivity = Date.now()
@@ -2017,6 +2038,7 @@ export function register(on) {
       activity.tools++
       activity.action = actionOf(e)
     }
+    if (!e.agentId && TOOL_ACT[e.tool]) petTool = { act: TOOL_ACT[e.tool], at: Date.now() }
     if (e.tool === 'TodoWrite' && Array.isArray(e.todos)) upsertTodos(key, e.todos)
     if (e.tool === 'AskUserQuestion') {
       waiting.add(key)
@@ -2040,6 +2062,10 @@ export function register(on) {
     }
 
     const ok = ran && ran.deny === undefined && ran.isError !== true
+    if (!e.agentId && petTool) petTool.at = Date.now() // its pose holds until a while after the tool is done
+    // a tool that failed, not one you declined
+    const declined = /permission|doesn't want to proceed|rejected/i.test(String(ran?.text ?? ran?.result ?? ''))
+    if (!e.agentId && ran && ran.deny === undefined && ran.isError === true && !declined) oopsUntil = Date.now() + 2500
     if (ok && !e.agentId && (e.tool === 'TaskCreate' || e.tool === 'TaskUpdate' || e.tool === 'TaskList')) {
       applyTaskResult(e, ran.result)
       $.ui.invalidate('ui.render')

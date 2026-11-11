@@ -1,6 +1,6 @@
 // Builds assets/demo-desktop.svg and assets/demo-terminal.svg: a self-playing session, drawn with
 // Deck's own track, strip and pet code so the demos match what Deck really shows.
-import { petSvgBody, PET_CSS } from '../hooks/pet.js'
+import { petSvgBody, PET_CSS, PET_VIEWBOX } from '../hooks/pet.js'
 import { desktopTrack, stripsSvg } from '../hooks/styles-desktop.js'
 import { terminalBar } from '../hooks/styles-terminal.js'
 import { STYLE, TIER } from '../hooks/theme.js'
@@ -14,10 +14,10 @@ const marks = [0.2, 0.4, 0.6, 0.8].map((f, i) => ({ f, stage: i === 1 }))
 
 // one session, scene by scene: [start%, end%]
 const SCENES = [
-  { t: [0, 15], pct: 8, name: 'Read routes', count: '1/5', style: 'run', pet: 'console', line: 'Reading the routes and mapping the auth flow.', agents: [['Map the routes', 'Grep', 'running', 'haiku', 6]] },
-  { t: [15, 32], pct: 40, name: 'Fixing auth', count: '3/5', style: 'run', pet: 'console', line: 'Two agents on it. Fixing the token check now.', agents: [['Map the routes', 'Done', 'done', 'haiku', 12], ['Write fixtures', 'Write', 'running', 'sonnet', 9]] },
+  { t: [0, 15], pct: 8, name: 'Read routes', count: '1/5', style: 'run', pet: 'read', line: 'Reading the routes and mapping the auth flow.', agents: [['Map the routes', 'Grep', 'running', 'haiku', 6]] },
+  { t: [15, 32], pct: 40, name: 'Fixing auth', count: '3/5', style: 'run', pet: 'delegate', minis: ['sonnet'], line: 'Two agents on it. Fixing the token check now.', agents: [['Map the routes', 'Done', 'done', 'haiku', 12], ['Write fixtures', 'Write', 'running', 'sonnet', 9]] },
   { t: [32, 50], pct: 60, name: 'Run suite', count: '4/5', style: 'ask', pet: 'alert', line: 'Run the test suite? (Bash: npm test)', agents: [['Write fixtures', 'Needs approval', 'waiting', 'sonnet', 19]] },
-  { t: [50, 66], pct: 80, name: 'Report', count: '5/5', style: 'run', pet: 'read', line: '24 tests pass. Writing the summary.', agents: [] },
+  { t: [50, 66], pct: 80, name: 'Report', count: '5/5', style: 'run', pet: 'type', line: '24 tests pass. Writing the summary.', agents: [] },
   { t: [66, 84], pct: 100, name: 'Done', count: '5/5', style: 'done', pet: 'celebrate', line: 'Done: auth fixed, 24 tests passing.', agents: [] },
   { t: [84, 100], collapsed: true, pet: 'idle', line: 'Done: auth fixed, 24 tests passing.' },
 ]
@@ -38,7 +38,7 @@ function petPoses(size) {
   let svg = ''
   SCENES.forEach((s, i) => {
     css += show('pp' + i, s.t)
-    svg += `<g class="pp${i}"><svg width="${size * 1.26}" height="${size}" viewBox="-4 -6 48 38" overflow="visible">${petSvgBody(s.pet)}</svg></g>`
+    svg += `<g class="pp${i}"><svg x="${-(size * 4) / 38}" y="${-(size * 4) / 38}" width="${(size * 64) / 38}" height="${(size * 42) / 38}" viewBox="${PET_VIEWBOX}" overflow="visible">${petSvgBody(s.pet, 0, { minis: s.minis })}</svg></g>`
   })
   return { css, svg }
 }

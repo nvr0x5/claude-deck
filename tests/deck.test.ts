@@ -789,3 +789,47 @@ test('/deck alerts off keeps quiet, and a bad threshold is explained', async ($,
   expect((await $.command.run({ command: 'deck', args: 'alerts 90,80' })).text).toMatch(/^Use \/deck alerts/)
   expect((await $.command.run({ command: 'deck', args: 'alerts 70,95' })).text).toMatch(/limits at 70% and 95%/)
 })
+
+test('the pet acts out the tool Claude is using', async ($, on) => {
+  const { clock } = stubs(on, undefined, undefined, null, undefined, 'allow')
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  await start($)
+  const petNow = async () => /· pet (\w+)/.exec((await $.command.run({ command: 'deck', args: 'status' })).text)?.[1]
+  await $.prompt.submit({ text: 'Fix the login bug' })
+  await $.turn.start({ text: 'Fix the login bug', turnId: 't1' })
+  await clock.advance(200)
+  expect(await petNow()).toBe('think')
+  for (const [tool, act] of [['Read', 'read'], ['Grep', 'search'], ['Edit', 'type'], ['Bash', 'terminal'], ['WebFetch', 'browse']]) {
+    await $.tool.call({ tool, file_path: 'a.ts', pattern: 'x', command: 'ls', url: 'https://example.com' })
+    await clock.advance(200)
+    expect(await petNow()).toBe(act)
+  }
+})
+
+test('the pet shows subagents and failures', async ($, on) => {
+  const { clock } = stubs(on, undefined, ($, e) => (e.tool === 'Bash' ? { result: 'boom', isError: true } : { result: 'ok' }), null, undefined, 'allow')
+  on('turn.start', ($, e) => ({ turnId: e.turnId }))
+  on('ui.toast', () => ({ value: undefined }))
+  on('agent.spawn', () => ({ model: 'claude-haiku-4-5', agentId: 'h1' }))
+  await start($)
+  const petNow = async () => /· pet (\w+)/.exec((await $.command.run({ command: 'deck', args: 'status' })).text)?.[1]
+  await $.prompt.submit({ text: 'Map the repo' })
+  await $.turn.start({ text: 'Map the repo', turnId: 't1' })
+  await $.agent.spawn(spawn('h1', 'map the tables'))
+  await clock.advance(200)
+  expect(await petNow()).toBe('delegate')
+  await $.turn.complete({ turnId: 'x', agentId: 'h1', answer: 'ok', durationMs: 5, isAborted: false, reason: 'answer', usage: null })
+  await $.tool.call({ tool: 'Bash', command: 'make' })
+  await clock.advance(200)
+  expect(await petNow()).toBe('error')
+})
+
+test('an idle pet worries when a limit is nearly spent', async ($, on) => {
+  const { clock } = stubs(on)
+  on('ui.toast', () => ({ value: undefined }))
+  await start($)
+  await $.session.measure({ rateLimits: [{ kind: 'five_hour', percentUsed: 95, resetsAt: inAnHour() }], changed: ['rateLimits'] })
+  await clock.advance(200)
+  const pet = /· pet (\w+)/.exec((await $.command.run({ command: 'deck', args: 'status' })).text)?.[1]
+  expect(['worried', 'idle']).toContain(pet)
+})
