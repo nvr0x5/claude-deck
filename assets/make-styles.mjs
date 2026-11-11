@@ -99,7 +99,7 @@ y += 78
 // text
 body += `<rect x="20" y="${y}" width="${W - 40}" height="58" rx="10" fill="#262626"/>` + label(36, y + 24, 'Text', 14) + mono(36, y + 42, 'text', '#77756f')
 {
-  const parts = [[STYLE.ok.desk, STYLE.ok.glyph], ['#9a9893', ' 5h 31% ↻2h14m  '], [STYLE.warn.desk, STYLE.warn.glyph], ['#9a9893', ' 7d 64% ↻3d 5h  '], [STYLE.run.desk, STYLE.run.glyph], ['#9a9893', ' ctx 12%  '], [STYLE.run.desk, STYLE.run.glyph], ['#9a9893', ' Fixing auth 3/5  '], [STYLE.run.desk, '⇄'], ['#9a9893', ' opus · medium  ⛅ 31° Tangerang  ◷ 10:16']]
+  const parts = [[STYLE.ok.desk, STYLE.ok.glyph], ['#9a9893', ' 5h 31% ↻2h14m  '], [STYLE.warn.desk, STYLE.warn.glyph], ['#9a9893', ' 7d 64% ↻3d 5h  '], [STYLE.run.desk, STYLE.run.glyph], ['#9a9893', ' ctx 12%  '], [STYLE.run.desk, STYLE.run.glyph], ['#9a9893', ' Fixing auth 3/5  '], [STYLE.run.desk, '⇄'], ['#9a9893', ' opus · medium  ⛅ 31° Lisbon  ◷ 10:16']]
   body += `<text x="190" y="${y + 24}" style="font:400 13px ${SANS}" xml:space="preserve">${parts.map(([c, t]) => `<tspan fill="${c}">${esc(t)}</tspan>`).join('')}</text>`
   body += `<text x="190" y="${y + 44}" style="font:400 11px ${MONO}" xml:space="preserve">${parts.map(([c, t]) => `<tspan fill="${c === '#9a9893' ? c : c}">${esc(t.replace('◷ ', ''))}</tspan>`).join('')}</text>`
 }

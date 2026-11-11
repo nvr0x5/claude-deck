@@ -49,7 +49,7 @@ function collapsedText(x, y, font, size, colors) {
     [STYLE.warn.glyph, colors(STYLE.warn)], [' ' + LIMITS[1].short + '  ', '#9a9893'],
     [STYLE.run.glyph, colors(STYLE.run)], [' ' + CTX.short + '  ', '#9a9893'],
     [STYLE.done.glyph, colors(STYLE.done)], [' Fix the auth b…  ', '#9a9893'],
-    ['⇄', colors(STYLE.run)], [' opus · medium  ⛅ 31° Tangerang  10:16:44', '#9a9893'],
+    ['⇄', colors(STYLE.run)], [' opus · medium  ⛅ 31° Lisbon  10:16:44', '#9a9893'],
   ]
   return `<text x="${x}" y="${y}" style="font:400 ${size}px ${font}" xml:space="preserve">${parts.map(([t, c]) => `<tspan fill="${c}">${esc(t)}</tspan>`).join('')}</text>`
 }
@@ -113,7 +113,7 @@ function desktop() {
     if (s.collapsed) {
       g += `<text x="${L}" y="${headerY + 18}" style="font:400 13px ${SANS};fill:#77756f">deck ▸</text>` + collapsedText(L + 64, headerY + 18, MONO, 13, (st) => st.desk)
     } else {
-      g += `<text x="${L}" y="${headerY + 18}" style="font:400 13px ${SANS};fill:#77756f">deck ▾  · 5 rows</text><text x="${W - 50}" y="${headerY + 18}" text-anchor="end" style="font:400 13px ${MONO};fill:#9a9893">⛅ 31° Tangerang  ·  ◷ 10:16:44</text>`
+      g += `<text x="${L}" y="${headerY + 18}" style="font:400 13px ${SANS};fill:#77756f">deck ▾  · 5 rows</text><text x="${W - 50}" y="${headerY + 18}" text-anchor="end" style="font:400 13px ${MONO};fill:#9a9893">⛅ 31° Lisbon  ·  ◷ 10:16:44</text>`
       let y = headerY + 34
       g += route(y)
       y += 38
@@ -198,7 +198,7 @@ function terminal() {
       g += tt(X, top + LH * 3, '0: deck ▸', '#77756f') + collapsedText(X + 11 * CW, top + LH * 3, MONO, 13, (st) => st.fill)
     } else {
       let y = top
-      g += tt(X, y, '0: deck ▾ · 5 rows', '#77756f') + tt(X + COLS * CW, y, '10:16:44  ·  31° cloudy · Tangerang', '#9a9893', ' text-anchor="end"')
+      g += tt(X, y, '0: deck ▾ · 5 rows', '#77756f') + tt(X + COLS * CW, y, '10:16:44  ·  31° cloudy · Lisbon', '#9a9893', ' text-anchor="end"')
       y += LH
       const route = [['⇄ ', STYLE.run.fill], ['Model route'.padEnd(labelW + 1), '#e8e6e1'], ['opus ', '#77756f'], ['= ', '#9a9893'], [' opus ', '#1e1e1e', TIER.opus.term], ['  jev: haiku', '#77756f'], ['  effort ', '#9a9893'], ['▁▃', STYLE.run.fill], ['·· medium', '#77756f'], ['  conf 0.89', STYLE.ok.fill]]
       let x = X
