@@ -36,7 +36,7 @@ const FOLD_MS = 5000
 const MAX_STRIPS = 4
 const ASK_DELAY_MS = 600
 const TRACK_H = 22
-const VERSION = '0.5.0' // keep in step with .claude-plugin/plugin.json (a test checks)
+const VERSION = '0.5.1' // keep in step with .claude-plugin/plugin.json (a test checks)
 const RIGHT_W = 92
 const HEADER_CH = 20 // the terminal header's toggle and row count, with their gaps
 const TITLE_MAX_CH = 22 // a long prompt as a bar title would squeeze every track
@@ -210,6 +210,7 @@ function paceOf(rl, now) {
 
 function fmtDur(ms) {
   const m = Math.max(1, Math.round(ms / 60_000))
+  if (m >= 48 * 60) return Math.floor(m / 1440) + 'd' + (Math.round((m % 1440) / 60) ? ' ' + Math.round((m % 1440) / 60) + 'h' : '')
   return m < 60 ? m + 'm' : Math.floor(m / 60) + 'h' + (m % 60 ? (m % 60) + 'm' : '')
 }
 
@@ -804,11 +805,12 @@ function collectRows(now) {
         id: 'limit:' + rl.kind,
         kind: 'meter',
         limit: true,
-        style: p >= 80 ? 'hot' : p >= 50 || out ? 'warn' : 'ok',
+        // early in a window one busy stretch projects a run-out; amber once it's also past 40%, as the alert
+        style: p >= 80 ? 'hot' : p >= 50 || (out && p >= 40) ? 'warn' : 'ok',
         title,
         pct: Math.min(100, p),
         marks: [{ f: 0.25 }, { f: 0.5 }, { f: 0.75 }],
-        name: tag + ' · ' + Math.round(p) + '% used' + (out || atReset ? ' · ' + (out || atReset) : ''),
+        name: tag + ' · ' + Math.round(p) + '%' + (out || atReset ? ' · ' + (out || atReset) : ' used'),
         count: '',
         right: rl.resetsAt ? '↻ ' + countdown(rl.resetsAt) : '',
         short: tag + ' ' + Math.round(p) + '%' + (out ? ' out ~' + fmtDur(pace.outInMs) : rl.resetsAt ? ' ↻' + humanReset(rl.resetsAt) : ''),

@@ -732,7 +732,7 @@ test('a limit on pace to run out before it resets says so, with a toast, and ope
   const resets = inMinutes(74)
   await $.session.measure(limit5h(50, resets))
   let out = await $.command.run({ command: 'deck', args: 'status' })
-  expect(out.text).toMatch(/5h · 50% used · out in ~50m/)
+  expect(out.text).toMatch(/5h · 50% · out in ~50m/)
   expect(out.text).toMatch(/expanded/)
   expect(toasts).toHaveLength(1)
   expect(toasts[0]).toMatch(/Session · 5h is on pace to run out in ~50m, before it resets/)
@@ -753,7 +753,7 @@ test('a slow limit shows where it lands at reset, without an alert', async ($, o
   await start($)
   await $.session.measure(limit5h(32, inMinutes(64)))
   const out = await $.command.run({ command: 'deck', args: 'status' })
-  expect(out.text).toMatch(/5h · 32% used · ~45% at reset/)
+  expect(out.text).toMatch(/5h · 32% · ~45% at reset/)
   expect(toasts).toHaveLength(0)
 })
 
@@ -832,4 +832,18 @@ test('an idle pet worries when a limit is nearly spent', async ($, on) => {
   await clock.advance(200)
   const pet = /· pet (\w+)/.exec((await $.command.run({ command: 'deck', args: 'status' })).text)?.[1]
   expect(['worried', 'idle']).toContain(pet)
+})
+
+test('a weekly limit early in its window: run-out in days, not amber yet, and its label outlined past a short fill', async ($, on) => {
+  // 20% a day ago, 34% now: about 4 days to run out, with 5d 16h to go
+  stubs(on, new Map<string, unknown>([['hist', { seven_day: [{ t: Date.now() - 23 * 3600_000, p: 20 }] }]]))
+  on('ui.toast', () => ({ value: undefined }))
+  await start($)
+  await $.session.measure({ rateLimits: [{ kind: 'seven_day', percentUsed: 34, resetsAt: inMinutes(5 * 1440 + 16 * 60) }], changed: ['rateLimits'] })
+  const out = await $.command.run({ command: 'deck', args: 'status' })
+  expect(out.text).toMatch(/◔ Weekly · 7d — 7d · 34% · out in ~\d+d( \d+h)?/)
+  await $.command.run({ command: 'deck', args: 'expand' })
+  const desk = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const drawn = JSON.stringify(await desk.drawn())
+  expect(drawn).toMatch(/stroke-width=\\"1\.2\\"/)
 })

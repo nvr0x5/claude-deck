@@ -39,6 +39,7 @@ function pillMarkup(row, W, fx, from, color, maxShare = 0.55) {
   const icon = ICON_PATH[row.style]
   let knob
   let kw
+  let outside = false
   if (W < NARROW) {
     kw = H
     knob = `<circle cx="0" cy="${H / 2}" r="${H / 2}" fill="${color}"/>`
@@ -50,12 +51,17 @@ function pillMarkup(row, W, fx, from, color, maxShare = 0.55) {
     while (shown.length > 3 && 20 + iconW + textWidth(shown) + countW > maxW) shown = shown.slice(0, -1)
     if (shown !== row.name) shown = shown.trimEnd() + '…'
     kw = Math.round(20 + iconW + textWidth(shown) + countW)
+    // a label wider than the fill sits outlined just past it, so it doesn't read as more progress
+    outside = fx < kw + 2
+    const ink = outside ? color : '#fff'
     const left = -kw / 2 + 10
-    knob = `<rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" rx="${H / 2}" fill="${color}"/>`
-    if (icon) knob += `<path d="${icon}" transform="translate(${left} 5) scale(.5)" fill="none" stroke="#fff" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`
-    knob += `<text x="${left + iconW}" y="${H / 2 + 4.2}" style="font:500 12px ${FONT};fill:#fff">${esc(shown)}${row.count ? `<tspan dx="6" style="font-weight:400;fill-opacity:.75">${esc(row.count)}</tspan>` : ''}</text>`
+    knob = outside
+      ? `<rect x="${-kw / 2 + 0.6}" y=".6" width="${kw - 1.2}" height="${H - 1.2}" rx="${H / 2 - 0.6}" fill="#1f1e1d" fill-opacity=".9" stroke="${color}" stroke-width="1.2"/>`
+      : `<rect x="${-kw / 2}" y="0" width="${kw}" height="${H}" rx="${H / 2}" fill="${color}"/>`
+    if (icon) knob += `<path d="${icon}" transform="translate(${left} 5) scale(.5)" fill="none" stroke="${ink}" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>`
+    knob += `<text x="${left + iconW}" y="${H / 2 + 4.2}" style="font:500 12px ${FONT};fill:${ink}">${esc(shown)}${row.count ? `<tspan dx="6" style="font-weight:400;fill-opacity:.75">${esc(row.count)}</tspan>` : ''}</text>`
   }
-  const at = (x) => Math.max(kw / 2, Math.min(W - kw / 2, x >= kw ? x - kw / 2 : x + kw / 2))
+  const at = (x) => Math.max(kw / 2, Math.min(W - kw / 2, outside ? x + 4 + kw / 2 : x >= kw ? x - kw / 2 : x + kw / 2))
   const kx = at(fx)
   const kFrom = at(from)
   const glide = Math.abs(kFrom - kx) > 0.5 ? `<animateTransform attributeName="transform" type="translate" from="${kFrom.toFixed(1)} 0" to="${kx.toFixed(1)} 0" dur=".45s" ${EASE} fill="freeze"/>` : ''

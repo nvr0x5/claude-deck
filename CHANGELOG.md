@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.1
+
+- Fixed: a bar label wider than the bar's fill drew from the end of the fill onward, so a 34% weekly limit looked about 85% full. The label now sits outlined just past the fill.
+- A limit on pace to run out turns amber only once it's past 40%, like its alert. Early in a week, one busy day no longer paints the weekly row amber.
+- Long run-out times read in days (`out in ~4d 1h`), and limit labels are shorter (`5h · 60% · out in ~1h`).
+
 ## 0.5.0
 
 - **A new pet.** Redrawn, with 15 poses that follow what Claude is really doing instead of a random pick: a thought bubble while it thinks, a book for Read, a magnifier for Grep and Glob, a laptop for Edit and Write, a terminal for Bash, a globe for the web, little helpers in their model's color for subagents, X eyes when a tool fails, a sweat drop near a usage limit, and a nightcap when idle.
